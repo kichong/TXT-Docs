@@ -40,6 +40,12 @@ let closeAfterSave = false;
 let forceClose = false;
 const pendingExternalPaths: string[] = [];
 
+function applicationIconPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'icon.ico')
+    : join(process.cwd(), 'build', 'icon.ico');
+}
+
 function queueExternalDocument(commandLine: string[]): void {
   const path = findLaunchDocumentPath(commandLine);
   if (path && !pendingExternalPaths.includes(path)) pendingExternalPaths.push(path);
@@ -388,6 +394,7 @@ function createWindow(): void {
     show: false,
     backgroundColor: '#202226',
     title: 'TXT Docs',
+    icon: applicationIconPath(),
     webPreferences: {
       preload: join(__dirname, '../preload/preload.cjs'),
       nodeIntegration: false,

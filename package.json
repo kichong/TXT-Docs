@@ -49,6 +49,12 @@
       "dist/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
     "fileAssociations": [
       {
         "ext": "docx",
@@ -75,6 +81,7 @@
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ],
