@@ -714,6 +714,71 @@ select:focus-visible,
   min-width: 0;
 }
 
+.update-bar {
+  position: relative;
+  z-index: 15;
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 7px 14px 7px 16px;
+  color: var(--text);
+  background: var(--accent-soft);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  font-size: 12px;
+}
+
+.update-bar-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.update-bar-copy strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.update-bar-copy > span:not(.update-progress) {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.update-bar-actions,
+.update-bar-actions .primary-button {
+  display: flex;
+  align-items: center;
+}
+
+.update-bar-actions {
+  flex: none;
+  gap: 6px;
+}
+
+.update-bar-actions .primary-button {
+  gap: 6px;
+}
+
+.update-progress {
+  width: min(360px, 44vw);
+  height: 3px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--border-strong) 45%, transparent);
+}
+
+.update-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease-out;
+}
+
 .message-bar.is-error {
   color: #812732;
   background: var(--danger-soft);
@@ -1227,6 +1292,67 @@ select:focus-visible,
   margin-right: 13px;
   color: var(--border-strong);
   content: "·";
+}
+
+.statusbar-actions {
+  gap: 12px !important;
+}
+
+.update-control {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.version-label {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.update-status-button {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-muted);
+  background: var(--chrome-elevated);
+  cursor: pointer;
+  font: inherit;
+}
+
+.update-status-button:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.update-control.is-available .version-label,
+.update-control.is-downloaded .version-label,
+.update-control.is-available .update-status-button,
+.update-control.is-downloaded .update-status-button {
+  color: var(--accent);
+}
+
+.update-status-busy {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.update-status-busy svg {
+  animation: update-spin 900ms linear infinite;
+}
+
+@keyframes update-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .zoom-controls {
