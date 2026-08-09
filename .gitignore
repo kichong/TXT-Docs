@@ -1,0 +1,10 @@
+node_modules/
+.vite/
+out/
+dist/
+release/
+coverage/
+*.log
+tmp/
+.DS_Store
+Thumbs.db
