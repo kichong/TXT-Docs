@@ -101,6 +101,26 @@ export interface ConverterStatus {
   detail: string;
 }
 
+export type UpdatePhase =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'up-to-date'
+  | 'error'
+  | 'unavailable';
+
+export interface AppUpdateState {
+  currentVersion: string;
+  phase: UpdatePhase;
+  canCheck: boolean;
+  availableVersion?: string;
+  downloadPercent?: number;
+  lastCheckedAt?: string;
+  message?: string;
+}
+
 export type AppCommand =
   | 'new'
   | 'open'
@@ -131,9 +151,14 @@ export interface DesktopDocumentsApi {
   writeRecovery(document: EditorDocumentV1): Promise<void>;
   readRecovery(): Promise<RecoveryDraft | null>;
   clearRecovery(): Promise<void>;
+  getUpdateState(): Promise<AppUpdateState>;
+  checkForUpdates(): Promise<AppUpdateState>;
+  downloadUpdate(): Promise<AppUpdateState>;
+  installUpdate(): Promise<void>;
   setDirty(dirty: boolean): void;
   requestCloseAfterSave(): void;
   onCommand(callback: (command: AppCommand) => void): () => void;
+  onUpdateState(callback: (state: AppUpdateState) => void): () => void;
 }
 
 export const DEFAULT_PAGE_SETTINGS: PageSettings = {

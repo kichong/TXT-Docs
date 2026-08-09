@@ -1,10 +1,16 @@
 {
   "name": "txt-docs",
   "productName": "TXT Docs",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A minimal local-first Windows word processor for DOCX, Markdown, and plain-text documents.",
   "main": "dist/main/main.cjs",
   "private": true,
+  "packageManager": "pnpm@11.20.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kichong/TXT-Docs.git"
+  },
+  "homepage": "https://github.com/kichong/TXT-Docs",
   "scripts": {
     "start": "concurrently -k \"pnpm dev:renderer\" \"pnpm dev:main\" \"pnpm dev:preload\" \"pnpm dev:electron\"",
     "dev:renderer": "vite --config vite.renderer.config.ts",
@@ -15,6 +21,7 @@
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true});require('fs').rmSync('release',{recursive:true,force:true})\"",
     "package": "pnpm build && electron-builder --dir",
     "make": "pnpm build && electron-builder --publish never",
+    "release:github": "pnpm build && electron-builder --win nsis --x64 --publish always",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -26,7 +33,15 @@
     "appId": "com.txtdocs.app",
     "productName": "TXT Docs",
     "asar": true,
-    "publish": null,
+    "electronUpdaterCompatibility": ">=2.16",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kichong",
+        "repo": "TXT-Docs",
+        "releaseType": "draft"
+      }
+    ],
     "directories": {
       "output": "release"
     },
@@ -35,10 +50,29 @@
       "package.json"
     ],
     "fileAssociations": [
-      { "ext": "docx", "name": "Word document", "role": "Editor" },
-      { "ext": "doc", "name": "Legacy Word document", "role": "Editor" },
-      { "ext": "txt", "name": "Plain text document", "role": "Editor" },
-      { "ext": ["md", "markdown"], "name": "Markdown document", "role": "Editor" }
+      {
+        "ext": "docx",
+        "name": "Word document",
+        "role": "Editor"
+      },
+      {
+        "ext": "doc",
+        "name": "Legacy Word document",
+        "role": "Editor"
+      },
+      {
+        "ext": "txt",
+        "name": "Plain text document",
+        "role": "Editor"
+      },
+      {
+        "ext": [
+          "md",
+          "markdown"
+        ],
+        "name": "Markdown document",
+        "role": "Editor"
+      }
     ],
     "win": {
       "target": [
@@ -49,7 +83,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "differentialPackage": false,
+      "differentialPackage": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }
@@ -74,6 +108,7 @@
     "@tiptap/react": "^3.29.1",
     "@tiptap/starter-kit": "^3.29.1",
     "docx": "^9.7.1",
+    "electron-updater": "^6.8.9",
     "fast-xml-parser": "^5.10.1",
     "jszip": "^3.10.1",
     "lucide-react": "^1.27.0",

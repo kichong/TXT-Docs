@@ -18,6 +18,7 @@ import { LocalDocumentStorage } from './main/storage';
 import { findLaunchDocumentPath } from './main/launch-files';
 import { contentToPlainText, plainTextToContent } from './shared/plain-text';
 import { editorDocumentSchema, printRequestSchema, saveRequestSchema } from './shared/schemas';
+import { AppUpdateManager } from './main/updater';
 import type {
   AppCommand,
   DocumentFormat,
@@ -33,6 +34,7 @@ import type {
 
 let mainWindow: BrowserWindow | null = null;
 let storage: LocalDocumentStorage;
+let updateManager: AppUpdateManager;
 let dirty = false;
 let closeAfterSave = false;
 let forceClose = false;
@@ -90,6 +92,25 @@ function createApplicationMenu(): void {
         { role: 'zoomOut' },
         { type: 'separator' },
         { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        { label: 'Check for Updates…', click: () => void updateManager.checkForUpdates() },
+        { type: 'separator' },
+        {
+          label: `About TXT Docs v${app.getVersion()}`,
+          click: () => {
+            void dialog.showMessageBox(mainWindow!, {
+              type: 'info',
+              title: 'About TXT Docs',
+              message: `TXT Docs v${app.getVersion()}`,
+              detail: 'A free, open-source word processor.\n\nLicensed under Apache License 2.0.',
+              buttons: ['OK'],
+            });
+          },
+        },
       ],
     },
   ];
@@ -341,6 +362,14 @@ function installIpcHandlers(): void {
   });
   ipcMain.handle('documents:read-recovery', () => storage.readRecovery());
   ipcMain.handle('documents:clear-recovery', () => storage.clearRecovery());
+  ipcMain.handle('updates:get-state', () => updateManager.getState());
+  ipcMain.handle('updates:check', () => updateManager.checkForUpdates());
+  ipcMain.handle('updates:download', () => updateManager.downloadUpdate());
+  ipcMain.handle('updates:install', () => {
+    if (dirty) throw new Error('Save your document before restarting to install the update.');
+    forceClose = true;
+    updateManager.installUpdate();
+  });
   ipcMain.on('documents:set-dirty', (_event, value: unknown) => {
     dirty = value === true;
   });
@@ -423,9 +452,19 @@ app.whenReady().then(async () => {
   app.setAppUserModelId('com.txtdocs.app');
   storage = new LocalDocumentStorage(join(app.getPath('userData'), 'local-data'));
   await storage.initialize();
+  updateManager = new AppUpdateManager(app.getVersion(), app.isPackaged, (state) => {
+    mainWindow?.webContents.send('app:update-state', state);
+  });
+  updateManager.initialize();
   installIpcHandlers();
   createApplicationMenu();
   createWindow();
+  if (app.isPackaged) {
+    const firstCheck = setTimeout(() => void updateManager.checkForUpdates(), 4_000);
+    firstCheck.unref();
+    const recurringCheck = setInterval(() => void updateManager.checkForUpdates(), 6 * 60 * 60 * 1_000);
+    recurringCheck.unref();
+  }
 });
 
 app.on('window-all-closed', () => app.quit());

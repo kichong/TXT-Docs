@@ -23,6 +23,7 @@ import {
   ClipboardPaste,
   Columns3,
   Copy,
+  Download,
   FilePlus2,
   FolderOpen,
   Highlighter,
@@ -37,6 +38,7 @@ import {
   Pilcrow,
   Printer,
   Redo2,
+  RefreshCw,
   Rows3,
   Save,
   Search,
@@ -60,11 +62,13 @@ import { contentToPlainText, plainTextToContent } from '../shared/plain-text';
 import {
   createBlankDocument,
   type AppCommand,
+  type AppUpdateState,
   type CompatibilityIssue,
   type EditorDocumentV1,
   type OpenResult,
   type RecoveryDraft,
 } from '../shared/types';
+import { presentUpdate, type UpdateAction } from '../shared/updates';
 
 type OperationState = 'ready' | 'opening' | 'saving' | 'printing';
 type PasteMode = 'source' | 'merge' | 'text';
@@ -344,6 +348,12 @@ export function App() {
   const [findQuery, setFindQuery] = useState('');
   const [findIndex, setFindIndex] = useState(0);
   const [findCount, setFindCount] = useState(0);
+  const [updateState, setUpdateState] = useState<AppUpdateState>({
+    currentVersion: '…',
+    phase: 'unavailable',
+    canCheck: false,
+  });
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const initialExternalOpenChecked = useRef(false);
   const plainTextMode = document.source?.format === 'txt' || document.source?.format === 'md';
@@ -401,6 +411,15 @@ export function App() {
       .readRecovery()
       .then((recoveryDraft) => setRecovery(recoveryDraft))
       .catch((loadError) => setError(safeError(loadError)));
+  }, []);
+
+  useEffect(() => {
+    const removeListener = window.documentsApi.onUpdateState((state) => setUpdateState(state));
+    void window.documentsApi
+      .getUpdateState()
+      .then((state) => setUpdateState(state))
+      .catch((loadError) => setError(safeError(loadError)));
+    return removeListener;
   }, []);
 
   useEffect(() => {
@@ -770,6 +789,28 @@ export function App() {
     editor?.getAttributes(editor?.isActive('heading') ? 'heading' : 'paragraph').lineHeight ?? '1.15',
   );
   const busy = operation !== 'ready';
+  const updatePresentation = presentUpdate(updateState);
+  const showUpdateBanner =
+    updatePresentation.important
+    && (updateState.phase !== 'available' || updateState.availableVersion !== dismissedUpdateVersion);
+
+  const runUpdateAction = async (action: UpdateAction): Promise<void> => {
+    if (!action) return;
+    setError(null);
+    try {
+      if (action === 'check') setUpdateState(await window.documentsApi.checkForUpdates());
+      if (action === 'download') setUpdateState(await window.documentsApi.downloadUpdate());
+      if (action === 'install') {
+        if (dirty) {
+          setNotice('Save your document before restarting to install the update.');
+          return;
+        }
+        await window.documentsApi.installUpdate();
+      }
+    } catch (updateError) {
+      setError(safeError(updateError));
+    }
+  };
 
   if (!editor) {
     return <main className="boot-screen">Preparing your document…</main>;
@@ -976,6 +1017,42 @@ export function App() {
       </header>
 
       <div className="notice-stack">
+        {showUpdateBanner && (
+          <div className={`update-bar is-${updateState.phase}`} role="status" aria-live="polite">
+            <div className="update-bar-copy">
+              <strong>{updatePresentation.detail}</strong>
+              {updateState.phase === 'available' && <span>Download it now or continue working and update later.</span>}
+              {updateState.phase === 'downloaded' && <span>Your document must be saved before TXT Docs restarts.</span>}
+              {updateState.phase === 'downloading' && (
+                <span className="update-progress" aria-hidden="true">
+                  <span style={{ width: `${updateState.downloadPercent ?? 0}%` }} />
+                </span>
+              )}
+            </div>
+            <div className="update-bar-actions">
+              {updatePresentation.action && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => void runUpdateAction(updatePresentation.action)}
+                >
+                  {updatePresentation.action === 'download' && <Download size={14} aria-hidden="true" />}
+                  {updatePresentation.action === 'install' && <RefreshCw size={14} aria-hidden="true" />}
+                  {updatePresentation.actionLabel}
+                </button>
+              )}
+              {updateState.phase === 'available' && (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => setDismissedUpdateVersion(updateState.availableVersion ?? null)}
+                >
+                  Later
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {(error || notice) && (
           <div className={`message-bar${error ? ' is-error' : ''}`} role={error ? 'alert' : 'status'}>
             <span>{error ?? notice}</span>
@@ -1105,10 +1182,33 @@ export function App() {
                   : 'DOCX'}
           </span>
         </div>
-        <div className="zoom-controls">
-          <ToolButton label="Zoom out" icon={<ZoomOut size={15} />} onClick={() => setZoom((value) => Math.max(0.6, value - 0.1))} subtle />
-          <button type="button" className="zoom-value" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
-          <ToolButton label="Zoom in" icon={<ZoomIn size={15} />} onClick={() => setZoom((value) => Math.min(1.4, value + 0.1))} subtle />
+        <div className="statusbar-actions">
+          <div className={`update-control is-${updateState.phase}`} aria-live="polite">
+            <span className="version-label">TXT Docs v{updateState.currentVersion}</span>
+            {updatePresentation.action && (
+              <button
+                type="button"
+                className="update-status-button"
+                title={updatePresentation.detail}
+                onClick={() => void runUpdateAction(updatePresentation.action)}
+              >
+                {updateState.phase === 'available' && <Download size={12} aria-hidden="true" />}
+                {updateState.phase === 'downloaded' && <RefreshCw size={12} aria-hidden="true" />}
+                {updatePresentation.actionLabel}
+              </button>
+            )}
+            {updatePresentation.busy && (
+              <span className="update-status-busy">
+                <RefreshCw size={11} aria-hidden="true" />
+                {updatePresentation.actionLabel}
+              </span>
+            )}
+          </div>
+          <div className="zoom-controls">
+            <ToolButton label="Zoom out" icon={<ZoomOut size={15} />} onClick={() => setZoom((value) => Math.max(0.6, value - 0.1))} subtle />
+            <button type="button" className="zoom-value" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
+            <ToolButton label="Zoom in" icon={<ZoomIn size={15} />} onClick={() => setZoom((value) => Math.min(1.4, value + 0.1))} subtle />
+          </div>
         </div>
       </footer>
     </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editorDocumentSchema, saveRequestSchema } from '../src/shared/schemas';
+import { appUpdateStateSchema, editorDocumentSchema, saveRequestSchema } from '../src/shared/schemas';
 import { createBlankDocument } from '../src/shared/types';
 
 describe('IPC schemas', () => {
@@ -36,5 +36,25 @@ describe('IPC schemas', () => {
         }),
       ).toHaveProperty('source.format', format);
     }
+  });
+
+  it('validates update state received across the preload boundary', () => {
+    expect(
+      appUpdateStateSchema.parse({
+        currentVersion: '0.3.0',
+        phase: 'available',
+        canCheck: true,
+        availableVersion: '0.4.0',
+        downloadPercent: 0,
+      }),
+    ).toHaveProperty('availableVersion', '0.4.0');
+    expect(() =>
+      appUpdateStateSchema.parse({
+        currentVersion: '0.3.0',
+        phase: 'downloading',
+        canCheck: true,
+        downloadPercent: 101,
+      }),
+    ).toThrow();
   });
 });

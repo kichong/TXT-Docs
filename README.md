@@ -14,6 +14,7 @@ TXT Docs is a local-first Windows word processor for everyday DOCX, Markdown, an
 - Native printing and clean, cursor-free Letter-size PDF output
 - Resizable document outline and compact four-action file toolbar
 - Recent documents and local crash recovery
+- Visible app version, automatic update checks, download progress, and restart-to-update through GitHub Releases
 - Optional legacy `.doc` import through an installed LibreOffice converter
 - Complete light and dark themes, including the editor paper and form controls
 
@@ -43,7 +44,17 @@ Create Windows distributables:
 pnpm make
 ```
 
-Installer output is written to `release/`. Code signing and automatic updates are intentionally deferred.
+Installer output is written to `release/`.
+
+## Releases and updates
+
+TXT Docs uses GitHub Releases as its public update feed. A tagged release is built and validated on a clean Windows runner, then published with the NSIS installer and the update metadata consumed by `electron-updater`.
+
+1. Update the version in `package.json` and commit it.
+2. Tag that commit with the matching version, such as `v0.3.0`.
+3. Push the tag. The **Release TXT Docs** GitHub Actions workflow runs the checks, builds the installer, uploads the release assets, and publishes the completed release.
+
+Installed builds check for updates shortly after launch and every six hours while running. Downloads require user confirmation, and TXT Docs asks the user to save before restarting to install. The current Windows installer is not code-signed, so Windows SmartScreen may warn on the initial download.
 
 ## License
 

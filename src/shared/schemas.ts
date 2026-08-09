@@ -57,3 +57,22 @@ export const saveRequestSchema = z.object({
 export const printRequestSchema = z.object({
   html: z.string().max(50_000_000),
 });
+
+export const appUpdateStateSchema = z.object({
+  currentVersion: z.string().min(1).max(100),
+  phase: z.enum([
+    'idle',
+    'checking',
+    'available',
+    'downloading',
+    'downloaded',
+    'up-to-date',
+    'error',
+    'unavailable',
+  ]),
+  canCheck: z.boolean(),
+  availableVersion: z.string().min(1).max(100).optional(),
+  downloadPercent: z.number().min(0).max(100).optional(),
+  lastCheckedAt: z.string().datetime().optional(),
+  message: z.string().max(1_000).optional(),
+});
