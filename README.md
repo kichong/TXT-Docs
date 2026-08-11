@@ -10,13 +10,15 @@ TXT Docs is a local-first Windows word processor for everyday DOCX, Markdown, an
 - Find text with `Ctrl+F`, match counts, next/previous navigation, and highlighted results
 - Paste with source formatting (default), merged formatting, or text only
 - Fonts, sizes, title and heading styles, basic color palettes, highlights, inline formatting, alignment, spacing, lists, and indentation
-- Links, images, simple resizable tables, and page breaks
+- Links, images, simple resizable tables, page breaks, and Word-compatible multi-section layouts with equal or unequal columns
 - Native printing and clean, cursor-free Letter-size PDF output
 - Resizable document outline and compact four-action file toolbar
 - Recent documents and local crash recovery
 - Visible app version, automatic update checks, download progress, and restart-to-update through GitHub Releases
 - Optional legacy `.doc` import through an installed LibreOffice converter
 - Complete light and dark themes, including the editor paper and form controls
+- Theme-aware text and highlight previews that preserve saved colors while maintaining readable contrast
+- Persistent toolbar customization with movable or hidden tool chunks, optional Paste/Page layout controls, collapse/reset actions, and adjustable heading defaults
 
 Markdown and plain-text files use a deliberately unformatted editing mode so their source text stays literal and portable. Saving a rich document as `.txt` or `.md` flattens it to plain text.
 

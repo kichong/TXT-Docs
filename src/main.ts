@@ -18,6 +18,7 @@ import { LocalDocumentStorage } from './main/storage';
 import { findLaunchDocumentPath } from './main/launch-files';
 import { contentToPlainText, plainTextToContent } from './shared/plain-text';
 import { editorDocumentSchema, printRequestSchema, saveRequestSchema } from './shared/schemas';
+import { DEFAULT_PAGE_SETTINGS } from './shared/types';
 import { AppUpdateManager } from './main/updater';
 import type {
   AppCommand,
@@ -25,6 +26,7 @@ import type {
   EditorDocumentV1,
   ImageAsset,
   OpenResult,
+  PageSettings,
   PrintRequest,
   PrintResult,
   SaveRequest,
@@ -136,11 +138,7 @@ async function openPath(path: string): Promise<OpenResult> {
         schemaVersion: 1,
         title: parse(path).name,
         content: plainTextToContent(await readFile(path, 'utf8')),
-        page: {
-          size: 'letter',
-          orientation: 'portrait',
-          marginsIn: { top: 1, right: 1, bottom: 1, left: 1 },
-        },
+        page: DEFAULT_PAGE_SETTINGS,
         source,
         compatibilityIssues: [],
       },
@@ -200,11 +198,24 @@ function saveFormatForPath(path: string): SaveFormat {
 }
 
 const PRINT_STYLES = `
-  @page { size: Letter portrait; margin: 1in; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; color: #202124; background: #fff; }
   body { font-family: Aptos, Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.15; }
   .document-editor { min-height: 0; outline: none; caret-color: transparent; }
+  .document-editor [data-text-color] { color: var(--document-text-color) !important; }
+  .document-editor mark {
+    padding: 0 .06em; border-radius: 2px; color: var(--highlight-foreground, #202124);
+    -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  }
+  .document-editor section[data-document-section] {
+    min-width: 0; column-count: var(--section-columns, 1); column-gap: var(--section-column-gap, .5in);
+  }
+  .document-editor section[data-document-section][data-explicit-columns="true"] {
+    display: grid; grid-template-columns: var(--section-column-template); gap: var(--section-column-gap, 0); column-count: 1;
+  }
+  .document-editor [data-document-column] { min-width: 0; }
+  .document-editor [data-document-column] > :first-child { margin-top: 0; }
+  .document-editor [data-document-column] > :last-child { margin-bottom: 0; }
   .document-editor p { min-height: 1.15em; margin: 0 0 8pt; }
   .document-editor p[data-paragraph-style="no-spacing"] { margin-bottom: 0; line-height: 1; }
   .document-editor p[data-paragraph-style="title"] {
@@ -231,7 +242,17 @@ const PRINT_STYLES = `
   ::selection { color: inherit; background: transparent; }
 `;
 
-async function createPrintWindow(html: string): Promise<BrowserWindow> {
+function printLayoutStyles(page: PageSettings): string {
+  const columns = Math.max(1, Math.min(8, Math.round(page.columns ?? 1)));
+  const gap = Math.max(0, Math.min(4, page.columnGapIn ?? 0.5));
+  const { top, right, bottom, left } = page.marginsIn;
+  return `
+    @page { size: Letter portrait; margin: ${top}in ${right}in ${bottom}in ${left}in; }
+    .document-editor { column-count: ${columns}; column-gap: ${gap}in; }
+  `;
+}
+
+async function createPrintWindow(html: string, pageSettings: PageSettings): Promise<BrowserWindow> {
   const printWindow = new BrowserWindow({
     show: false,
     backgroundColor: '#ffffff',
@@ -245,14 +266,14 @@ async function createPrintWindow(html: string): Promise<BrowserWindow> {
   const page = `<!doctype html>
     <html><head><meta charset="utf-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
-    <style>${PRINT_STYLES}</style></head>
+    <style>${PRINT_STYLES}${printLayoutStyles(pageSettings)}</style></head>
     <body><article class="document-editor">${html}</article></body></html>`;
   await printWindow.loadURL(`data:text/html;base64,${Buffer.from(page, 'utf8').toString('base64')}`);
   return printWindow;
 }
 
-async function renderPdf(html: string): Promise<Uint8Array> {
-  const printWindow = await createPrintWindow(html);
+async function renderPdf(html: string, pageSettings: PageSettings): Promise<Uint8Array> {
+  const printWindow = await createPrintWindow(html, pageSettings);
   try {
     return await printWindow.webContents.printToPDF({
       pageSize: 'Letter',
@@ -266,11 +287,12 @@ async function renderPdf(html: string): Promise<Uint8Array> {
 }
 
 async function saveToPath(request: SaveRequest, path: string): Promise<SaveResult> {
-  const document = saveRequestSchema.parse(request).document as EditorDocumentV1;
+  const parsed = saveRequestSchema.parse(request);
+  const document = parsed.document as EditorDocumentV1;
   const format = saveFormatForPath(path);
   if (format === 'pdf') {
-    if (!request.printHtml) throw new Error('The document print surface was unavailable.');
-    await storage.atomicWrite(path, await renderPdf(request.printHtml));
+    if (!parsed.printHtml) throw new Error('The document print surface was unavailable.');
+    await storage.atomicWrite(path, await renderPdf(parsed.printHtml, document.page));
     return {
       status: 'saved',
       outputFormat: 'pdf',
@@ -329,7 +351,7 @@ function installIpcHandlers(): void {
   });
   ipcMain.handle('documents:print', async (_event, request: unknown): Promise<PrintResult> => {
     const parsed = printRequestSchema.parse(request) as PrintRequest;
-    const printWindow = await createPrintWindow(parsed.html);
+    const printWindow = await createPrintWindow(parsed.html, parsed.page);
     return new Promise((resolve) => {
       printWindow.webContents.print(
         { printBackground: true, silent: false },

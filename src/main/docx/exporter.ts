@@ -1,6 +1,7 @@
 import {
   AlignmentType,
   BorderStyle,
+  Column,
   Document,
   ExternalHyperlink,
   HeadingLevel,
@@ -13,6 +14,7 @@ import {
   TableCell,
   TableRow,
   TextRun,
+  SectionType,
   UnderlineType,
   VerticalAlign,
   WidthType,
@@ -82,6 +84,10 @@ function dataUrlToImage(src: string): { data: Uint8Array; type: 'png' | 'jpg' | 
 
 function paragraphChildren(node: JSONContent): Array<TextRun | ExternalHyperlink | ImageRun | PageBreak> {
   const children: Array<TextRun | ExternalHyperlink | ImageRun | PageBreak> = [];
+  const tabIndentIn = Number(node.attrs?.tabIndentIn);
+  if (Number.isFinite(tabIndentIn) && tabIndentIn > 0) {
+    children.push(new TextRun({ text: '\t'.repeat(Math.max(1, Math.round(tabIndentIn / 0.5))) }));
+  }
   for (const child of node.content ?? []) {
     if (child.type === 'text') {
       const link = markOf(child, 'link');
@@ -153,8 +159,7 @@ function paragraphOptions(
           after: Number.isFinite(spacingAfterPt) && spacingAfterPt >= 0 ? Math.round(spacingAfterPt * 20) : undefined,
         }
       : undefined,
-    indent:
-      Number.isFinite(indent) && indent > 0
+    indent: Number.isFinite(indent) && indent > 0
         ? { left: Math.round(indent * 360) }
         : undefined,
     numbering,
@@ -219,9 +224,9 @@ function exportList(node: JSONContent, level = 0): ExportedBlock[] {
   return output;
 }
 
-function exportBlocks(document: EditorDocumentV1): ExportedBlock[] {
+function exportNodes(nodes: JSONContent[]): ExportedBlock[] {
   const blocks: ExportedBlock[] = [];
-  for (const node of document.content.content ?? []) {
+  for (const node of nodes) {
     if (node.type === 'paragraph' || node.type === 'heading') blocks.push(exportParagraph(node));
     else if (node.type === 'bulletList' || node.type === 'orderedList') blocks.push(...exportList(node));
     else if (node.type === 'table') blocks.push(exportTable(node));
@@ -238,6 +243,19 @@ function exportBlocks(document: EditorDocumentV1): ExportedBlock[] {
     }
   }
   return blocks.length ? blocks : [new Paragraph('')];
+}
+
+function exportBlocks(document: EditorDocumentV1): ExportedBlock[] {
+  return exportNodes(document.content.content ?? []);
+}
+
+function sectionChildren(node: JSONContent): JSONContent[] {
+  const children: JSONContent[] = [];
+  for (const child of node.content ?? []) {
+    if (child.type === 'documentColumn') children.push(...(child.content ?? []));
+    else children.push(child);
+  }
+  return children;
 }
 
 function numberingLevels(kind: 'bullet' | 'ordered') {
@@ -258,6 +276,55 @@ function numberingLevels(kind: 'bullet' | 'ordered') {
 }
 
 export async function exportDocx(document: EditorDocumentV1): Promise<Buffer> {
+  const pageProperties = {
+    size: { width: 12240, height: 15840 },
+    margin: {
+      top: Math.round(document.page.marginsIn.top * 1440),
+      right: Math.round(document.page.marginsIn.right * 1440),
+      bottom: Math.round(document.page.marginsIn.bottom * 1440),
+      left: Math.round(document.page.marginsIn.left * 1440),
+    },
+  };
+  const sectionNodes = (document.content.content ?? []).filter((node) => node.type === 'documentSection');
+  const sections = sectionNodes.length
+    ? sectionNodes.map((node, index) => {
+        const columns = Math.max(1, Math.min(8, Math.round(Number(node.attrs?.columns) || 1)));
+        const gap = Math.max(0, Number(node.attrs?.columnGapIn) || 0);
+        const widths = Array.isArray(node.attrs?.columnWidthsIn)
+          ? node.attrs.columnWidthsIn.map(Number).filter((width) => Number.isFinite(width) && width > 0)
+          : [];
+        return {
+          properties: {
+            type: index > 0 && node.attrs?.continuous ? SectionType.CONTINUOUS : undefined,
+            column: {
+              count: columns,
+              space: Math.round(gap * 1440),
+              equalWidth: widths.length !== columns,
+              children: widths.length === columns
+                ? widths.map((width, columnIndex) => new Column({
+                    width: Math.round(width * 1440),
+                    space: columnIndex < widths.length - 1 ? Math.round(gap * 1440) : 0,
+                  }))
+                : undefined,
+            },
+            page: pageProperties,
+          },
+          children: exportNodes(sectionChildren(node)),
+        };
+      })
+    : [
+        {
+          properties: {
+            column: {
+              count: Math.max(1, Math.min(8, Math.round(document.page.columns ?? 1))),
+              space: Math.round((document.page.columnGapIn ?? 0.5) * 1440),
+              equalWidth: true,
+            },
+            page: pageProperties,
+          },
+          children: exportBlocks(document),
+        },
+      ];
   const docx = new Document({
     creator: 'TXT Docs',
     title: document.title,
@@ -286,22 +353,7 @@ export async function exportDocx(document: EditorDocumentV1): Promise<Buffer> {
         { reference: 'txt-docs-numbering', levels: numberingLevels('ordered') },
       ],
     },
-    sections: [
-      {
-        properties: {
-          page: {
-            size: { width: 12240, height: 15840 },
-            margin: {
-              top: Math.round(document.page.marginsIn.top * 1440),
-              right: Math.round(document.page.marginsIn.right * 1440),
-              bottom: Math.round(document.page.marginsIn.bottom * 1440),
-              left: Math.round(document.page.marginsIn.left * 1440),
-            },
-          },
-        },
-        children: exportBlocks(document),
-      },
-    ],
+    sections,
   });
   return Packer.toBuffer(docx);
 }

@@ -16,10 +16,20 @@ function descendants(node: JSONContent): JSONContent[] {
   return [node, ...(node.content ?? []).flatMap(descendants)];
 }
 
+function nodeText(node: JSONContent): string {
+  return node.text ?? (node.content ?? []).map(nodeText).join('');
+}
+
 describe('DOCX adapter', () => {
   it('round-trips the supported semantic structure and formatting', async () => {
+    const blank = createBlankDocument('Round trip');
     const document: EditorDocumentV1 = {
-      ...createBlankDocument('Round trip'),
+      ...blank,
+      page: {
+        ...blank.page,
+        columns: 2,
+        columnGapIn: 0.4,
+      },
       content: {
         type: 'doc',
         content: [
@@ -40,6 +50,14 @@ describe('DOCX adapter', () => {
                   { type: 'textStyle', attrs: { color: '#336699', fontFamily: 'Arial', fontSize: '14pt' } },
                 ],
               },
+            ],
+          },
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: 'Before ' },
+              { type: 'text', text: 'linked', marks: [{ type: 'link', attrs: { href: 'https://example.com' } }] },
+              { type: 'text', text: ' after' },
             ],
           },
           {
@@ -98,6 +116,7 @@ describe('DOCX adapter', () => {
     expect(bytes.byteLength).toBeGreaterThan(1_000);
 
     const imported = await importDocx(bytes, source);
+    expect(imported.page).toMatchObject({ columns: 2, columnGapIn: 0.4 });
     const nodes = descendants(imported.content);
     expect(nodes.some((node) => node.type === 'heading' && node.attrs?.level === 1)).toBe(true);
     const headingText = nodes.find((node) => node.text === 'Round trip');
@@ -115,6 +134,27 @@ describe('DOCX adapter', () => {
       fontFamily: 'Arial',
       fontSize: '14pt',
     });
+    const linkedParagraph = nodes.find(
+      (node) => node.type === 'paragraph' && node.content?.some((child) => child.text === 'linked'),
+    );
+    expect(linkedParagraph?.content?.map((child) => child.text ?? '').join('')).toBe('Before linked after');
+  });
+
+  it('keeps content after self-closing Word paragraphs', async () => {
+    const bytes = await exportDocx(createBlankDocument('Self-closing paragraphs'));
+    const zip = await JSZip.loadAsync(bytes);
+    const documentXml = await zip.file('word/document.xml')!.async('text');
+    zip.file(
+      'word/document.xml',
+      documentXml.replace(
+        /<w:body>/u,
+        '<w:body><w:p/><w:p><w:r><w:t>Content after an empty paragraph</w:t></w:r></w:p>',
+      ),
+    );
+
+    const imported = await importDocx(await zip.generateAsync({ type: 'uint8array' }), source);
+    const nodes = descendants(imported.content);
+    expect(nodes.some((node) => node.text === 'Content after an empty paragraph')).toBe(true);
   });
 
   it('imports inherited document defaults for source font, size, color, and spacing', async () => {
@@ -133,6 +173,71 @@ describe('DOCX adapter', () => {
     });
     const paragraph = nodes.find((node) => node.type === 'paragraph');
     expect(paragraph?.attrs).toMatchObject({ lineHeight: '1.15', spacingAfterPt: 8 });
+  });
+
+  it('preserves continuous sections, unequal columns, and leading tab indents', async () => {
+    const document = createBlankDocument('Sectioned resume');
+    const left = Array.from({ length: 6 }, (_, index) => ({
+      type: 'paragraph',
+      attrs: index === 1 ? { tabIndentIn: 0.5 } : {},
+      content: [{ type: 'text', text: `Left detail ${index + 1}` }],
+    }));
+    const right = Array.from({ length: 4 }, (_, index) => ({
+      type: 'paragraph',
+      attrs: { textAlign: 'right' },
+      content: [{ type: 'text', text: `Role ${index + 1}` }],
+    }));
+    document.content = {
+      type: 'doc',
+      content: [
+        {
+          type: 'documentSection',
+          attrs: { columns: 1, columnGapIn: 0.5, continuous: false, explicitColumns: false },
+          content: [{ type: 'paragraph', attrs: { textAlign: 'center' }, content: [{ type: 'text', text: 'Resume header' }] }],
+        },
+        {
+          type: 'documentSection',
+          attrs: {
+            columns: 2,
+            columnGapIn: 0,
+            columnWidthsIn: [4, 2.5],
+            continuous: true,
+            explicitColumns: true,
+          },
+          content: [
+            { type: 'documentColumn', content: left },
+            { type: 'documentColumn', content: right },
+          ],
+        },
+      ],
+    };
+
+    const bytes = await exportDocx(document);
+    const zip = await JSZip.loadAsync(bytes);
+    const xml = await zip.file('word/document.xml')!.async('text');
+    expect(xml.match(/<w:sectPr/g)?.length).toBe(2);
+    expect(xml).toContain('<w:type w:val="continuous"/>');
+    expect(xml).toContain('<w:col w:w="5760"');
+    expect(xml).toContain('<w:col w:w="3600"');
+
+    const imported = await importDocx(bytes, source);
+    expect(imported.page.columns).toBe(1);
+    const sections = imported.content.content ?? [];
+    expect(sections).toHaveLength(2);
+    expect(sections[0]).toMatchObject({ type: 'documentSection', attrs: { columns: 1 } });
+    expect(sections[1]).toMatchObject({
+      type: 'documentSection',
+      attrs: {
+        columns: 2,
+        columnWidthsIn: [4, 2.5],
+        continuous: true,
+        explicitColumns: true,
+      },
+    });
+    expect(sections[1].content?.map((node) => node.type)).toEqual(['documentColumn', 'documentColumn']);
+    const nodes = descendants(imported.content);
+    expect(nodes.find((node) => nodeText(node) === 'Left detail 2')?.attrs?.tabIndentIn).toBe(0.5);
+    expect(imported.compatibilityIssues.map((issue) => issue.code)).not.toContain('uneven-columns');
   });
 
   it('rejects corrupt or encrypted input cleanly', async () => {

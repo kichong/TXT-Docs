@@ -17,6 +17,8 @@ export type SaveFormat = 'docx' | 'pdf' | 'txt' | 'md';
 export interface PageSettings {
   size: 'letter';
   orientation: 'portrait';
+  columns: number;
+  columnGapIn: number;
   marginsIn: {
     top: number;
     right: number;
@@ -76,6 +78,7 @@ export interface SaveResult {
 
 export interface PrintRequest {
   html: string;
+  page: PageSettings;
 }
 
 export interface PrintResult {
@@ -164,6 +167,8 @@ export interface DesktopDocumentsApi {
 export const DEFAULT_PAGE_SETTINGS: PageSettings = {
   size: 'letter',
   orientation: 'portrait',
+  columns: 1,
+  columnGapIn: 0.5,
   marginsIn: {
     top: 1,
     right: 1,

@@ -20,6 +20,15 @@ const parser = new XMLParser({
   trimValues: false,
 });
 
+const orderedParser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '',
+  removeNSPrefix: true,
+  parseAttributeValue: false,
+  preserveOrder: true,
+  trimValues: false,
+});
+
 const asArray = <T>(value: T | T[] | undefined | null): T[] => {
   if (value === undefined || value === null) return [];
   return Array.isArray(value) ? value : [value];
@@ -43,19 +52,55 @@ const basenameWithoutExtension = (fileName: string): string =>
 
 function parsePageSettings(documentXml: string): PageSettings {
   const data = parser.parse(documentXml);
-  const margins = data?.document?.body?.sectPr?.pgMar;
+  const section = data?.document?.body?.sectPr;
+  const margins = section?.pgMar;
   const inches = (value: unknown, fallback: number) => {
     const twips = Number(value);
     return Number.isFinite(twips) ? Math.max(0, Math.min(4, twips / 1440)) : fallback;
   };
+  const requestedColumns = Number(attr(section?.cols, 'num') ?? 1);
   return {
     ...DEFAULT_PAGE_SETTINGS,
+    columns: Number.isFinite(requestedColumns)
+      ? Math.max(1, Math.min(8, Math.round(requestedColumns)))
+      : DEFAULT_PAGE_SETTINGS.columns,
+    columnGapIn: inches(attr(section?.cols, 'space'), DEFAULT_PAGE_SETTINGS.columnGapIn),
     marginsIn: {
       top: inches(attr(margins, 'top'), DEFAULT_PAGE_SETTINGS.marginsIn.top),
       right: inches(attr(margins, 'right'), DEFAULT_PAGE_SETTINGS.marginsIn.right),
       bottom: inches(attr(margins, 'bottom'), DEFAULT_PAGE_SETTINGS.marginsIn.bottom),
       left: inches(attr(margins, 'left'), DEFAULT_PAGE_SETTINGS.marginsIn.left),
     },
+  };
+}
+
+interface SectionSpec {
+  columns: number;
+  columnGapIn: number;
+  columnWidthsIn?: number[];
+  continuous: boolean;
+}
+
+function parseSectionSpec(section: XmlNode | undefined): SectionSpec {
+  const requestedColumns = Number(attr(section?.cols, 'num') ?? 1);
+  const columns = Number.isFinite(requestedColumns)
+    ? Math.max(1, Math.min(8, Math.round(requestedColumns)))
+    : 1;
+  const requestedGap = Number(attr(section?.cols, 'space'));
+  const columnGapIn = Number.isFinite(requestedGap)
+    ? Math.max(0, Math.min(4, requestedGap / 1440))
+    : DEFAULT_PAGE_SETTINGS.columnGapIn;
+  const widths = asArray(section?.cols?.col)
+    .map((column) => Number(attr(column, 'w')) / 1440)
+    .filter((width) => Number.isFinite(width) && width > 0);
+  const equalWidth = attr(section?.cols, 'equalWidth');
+  return {
+    columns,
+    columnGapIn,
+    columnWidthsIn: widths.length === columns && !['1', 'true', 'on'].includes(String(equalWidth).toLowerCase())
+      ? widths
+      : undefined,
+    continuous: attr(section?.type, 'val') === 'continuous',
   };
 }
 
@@ -287,17 +332,22 @@ async function runsFromContainer(
   context: ImportContext,
   inheritedRun: XmlNode,
   linkHref?: string,
+  orderedChildren?: XmlNode[],
 ): Promise<{ content: JSONContent[]; hasPageBreak: boolean }> {
   const content: JSONContent[] = [];
   let hasPageBreak = false;
-  for (const run of asArray(container?.r)) {
+  const runs = asArray(container?.r);
+  const hyperlinks = asArray(container?.hyperlink);
+
+  const appendRun = async (run: XmlNode) => {
     const styleId = attr(run.rPr?.rStyle, 'val');
     const styleRun = mergeProperties(context.styles, styleId, 'run');
     const properties = { ...inheritedRun, ...styleRun, ...(run.rPr ?? {}) };
     const marks = runMarks(properties, context.themeFonts);
     if (linkHref) marks.push({ type: 'link', attrs: { href: linkHref } });
-    const pieces = asArray(run.t).map(textValue);
-    if (run.tab !== undefined) pieces.push('\t');
+    const pieces: string[] = [];
+    if (run.tab !== undefined) pieces.push(...asArray(run.tab).map(() => '\t'));
+    pieces.push(...asArray(run.t).map(textValue));
     for (const br of asArray(run.br)) {
       if (attr(br, 'type') === 'page') hasPageBreak = true;
       else pieces.push('\n');
@@ -319,14 +369,39 @@ async function runsFromContainer(
       const height = Math.max(32, Math.round(Number(attr(extent, 'cy') ?? 1371600) / 9525));
       content.push({ type: 'image', attrs: { src, width, height, alt: '' } });
     }
-  }
+  };
 
-  for (const hyperlink of asArray(container?.hyperlink)) {
+  const appendHyperlink = async (hyperlink: XmlNode, ordered?: XmlNode[]) => {
     const relationId = attr(hyperlink, 'id');
     const href = relationId ? context.relationships.get(relationId) : attr(hyperlink, 'anchor');
-    const linked = await runsFromContainer(hyperlink, context, inheritedRun, href);
+    const linked = await runsFromContainer(hyperlink, context, inheritedRun, href, ordered);
     content.push(...linked.content);
     hasPageBreak ||= linked.hasPageBreak;
+  };
+
+  if (orderedChildren) {
+    let runIndex = 0;
+    let hyperlinkIndex = 0;
+    for (const child of orderedChildren) {
+      if (child.r !== undefined && runIndex < runs.length) {
+        await appendRun(runs[runIndex]);
+        runIndex += 1;
+      } else if (child.hyperlink !== undefined && hyperlinkIndex < hyperlinks.length) {
+        await appendHyperlink(hyperlinks[hyperlinkIndex], asArray(child.hyperlink));
+        hyperlinkIndex += 1;
+      }
+    }
+    while (runIndex < runs.length) {
+      await appendRun(runs[runIndex]);
+      runIndex += 1;
+    }
+    while (hyperlinkIndex < hyperlinks.length) {
+      await appendHyperlink(hyperlinks[hyperlinkIndex]);
+      hyperlinkIndex += 1;
+    }
+  } else {
+    for (const run of runs) await appendRun(run);
+    for (const hyperlink of hyperlinks) await appendHyperlink(hyperlink);
   }
   return { content, hasPageBreak };
 }
@@ -337,14 +412,18 @@ interface ParagraphResult {
   pageBreakAfter: boolean;
 }
 
-async function importParagraph(paragraph: XmlNode, context: ImportContext): Promise<ParagraphResult> {
+async function importParagraph(
+  paragraph: XmlNode,
+  context: ImportContext,
+  orderedChildren?: XmlNode[],
+): Promise<ParagraphResult> {
   const styleId = attr(paragraph.pPr?.pStyle, 'val');
   const styleName = resolveStyleName(context, styleId);
   const styleParagraph = mergeProperties(context.styles, styleId, 'paragraph');
   const styleRun = mergeProperties(context.styles, styleId, 'run');
   const pPr = { ...styleParagraph, ...(paragraph.pPr ?? {}) };
   const inheritedRun = { ...styleRun, ...(pPr.rPr ?? {}) };
-  const { content, hasPageBreak } = await runsFromContainer(paragraph, context, inheritedRun);
+  const { content, hasPageBreak } = await runsFromContainer(paragraph, context, inheritedRun, undefined, orderedChildren);
 
   const headingMatch = styleName?.match(/^Heading\s*([1-6])$/iu);
   const alignment = attr(pPr.jc, 'val');
@@ -353,13 +432,24 @@ async function importParagraph(paragraph: XmlNode, context: ImportContext): Prom
   const spacingBefore = Number(attr(pPr.spacing, 'before'));
   const spacingAfter = Number(attr(pPr.spacing, 'after'));
   const attrs: Record<string, unknown> = {};
+  let leadingTabs = 0;
+  for (const child of content) {
+    if (child.type !== 'text' || !child.text) break;
+    const match = child.text.match(/^\t+/u);
+    if (!match) break;
+    leadingTabs += match[0].length;
+    child.text = child.text.slice(match[0].length);
+    if (child.text) break;
+  }
+  while (content[0]?.type === 'text' && content[0].text === '') content.shift();
+  if (leadingTabs > 0) attrs.tabIndentIn = Math.min(4, leadingTabs * 0.5);
   if (alignment && ['left', 'center', 'right', 'both', 'justify'].includes(alignment)) {
     attrs.textAlign = alignment === 'both' ? 'justify' : alignment;
   }
   if (leftIndent > 0) attrs.indent = Math.min(8, Math.max(1, Math.round(leftIndent / 360)));
-  if (line > 0) attrs.lineHeight = String(Math.round((line / 240) * 100) / 100);
-  if (Number.isFinite(spacingBefore) && spacingBefore >= 0) attrs.spacingBeforePt = spacingBefore / 20;
-  if (Number.isFinite(spacingAfter) && spacingAfter >= 0) attrs.spacingAfterPt = spacingAfter / 20;
+  attrs.lineHeight = line > 0 ? String(Math.round((line / 240) * 100) / 100) : '1';
+  attrs.spacingBeforePt = Number.isFinite(spacingBefore) && spacingBefore >= 0 ? spacingBefore / 20 : 0;
+  attrs.spacingAfterPt = Number.isFinite(spacingAfter) && spacingAfter >= 0 ? spacingAfter / 20 : 0;
   if (styleName?.toLowerCase() === 'no spacing') attrs.paragraphStyle = 'no-spacing';
   if (styleName?.toLowerCase() === 'title') attrs.paragraphStyle = 'title';
 
@@ -433,8 +523,11 @@ async function importTable(table: XmlNode, context: ImportContext): Promise<JSON
 
 function detectCompatibility(zip: JSZip, documentXml: string, numberingXml?: string): CompatibilityIssue[] {
   const issues: CompatibilityIssue[] = [];
-  const add = (code: string, title: string, detail: string) =>
-    issues.push({ code, severity: 'warning', title, detail });
+  const add = (code: string, title: string, detail: string) => {
+    if (!issues.some((issue) => issue.code === code)) {
+      issues.push({ code, severity: 'warning', title, detail });
+    }
+  };
   const files = Object.keys(zip.files);
   if (files.some((name) => /vbaProject\.bin$/iu.test(name))) {
     add('macros', 'Macros are not preserved', 'This document contains VBA macros. Save As is recommended.');
@@ -451,7 +544,8 @@ function detectCompatibility(zip: JSZip, documentXml: string, numberingXml?: str
     [/<m:oMath/iu, 'equations', 'Equations are not preserved', 'Office Math objects are outside the v1 model.'],
     [/<w:altChunk\b/iu, 'embedded-content', 'Embedded content is not preserved', 'Alternate content parts are unsupported.'],
     [/<wp:anchor\b/iu, 'floating-objects', 'Floating objects may move', 'Floating images are converted to inline images.'],
-    [/<w:cols\b[^>]*w:num="?[2-9]/iu, 'columns', 'Multi-column layout is not preserved', 'The editor uses a single page column.'],
+    [/<w:cols\b[^>]*w:equalWidth="?(?:0|false|off)/iu, 'uneven-columns', 'Uneven columns are simplified', 'TXT Docs preserves the column count and gap using equal-width columns.'],
+    [/<w:cols\b[^>]*>(?:(?!<\/w:cols>)[^])*?<w:col\b/iu, 'uneven-columns', 'Uneven columns are simplified', 'TXT Docs preserves the column count and gap using equal-width columns.'],
   ];
   for (const [pattern, code, title, detail] of checks) {
     if (pattern.test(documentXml)) add(code, title, detail);
@@ -473,13 +567,18 @@ function extractBodyBlocks(xml: string): Array<{ type: 'p' | 'tbl'; xml: string 
   let cursor = 0;
 
   while (cursor < body.length) {
-    const next = /<w:(p|tbl)(?=\s|>)/giu;
+    const next = /<w:(p|tbl)(?=\s|>)[^>]*>/giu;
     next.lastIndex = cursor;
     const match = next.exec(body);
     if (!match || match.index === undefined) break;
     const type = match[1] as 'p' | 'tbl';
     const blockStart = match.index;
     if (type === 'p') {
+      if (match[0].endsWith('/>')) {
+        blocks.push({ type, xml: match[0] });
+        cursor = next.lastIndex;
+        continue;
+      }
       const close = body.indexOf('</w:p>', next.lastIndex);
       if (close < 0) break;
       const blockEnd = close + '</w:p>'.length;
@@ -505,6 +604,57 @@ function extractBodyBlocks(xml: string): Array<{ type: 'p' | 'tbl'; xml: string 
     cursor = blockEnd;
   }
   return blocks;
+}
+
+function nodeText(node: JSONContent): string {
+  return node.text ?? (node.content ?? []).map(nodeText).join('');
+}
+
+function unevenColumnSplit(nodes: JSONContent[], columns: number): number | null {
+  if (columns !== 2 || nodes.length < 8) return null;
+  const minimum = Math.max(2, Math.floor(nodes.length * 0.25));
+  for (let index = minimum; index < nodes.length - 2; index += 1) {
+    const node = nodes[index];
+    if (!nodeText(node).trim() || node.attrs?.textAlign !== 'right') continue;
+    const following = nodes
+      .slice(index)
+      .filter((candidate) => nodeText(candidate).trim())
+      .slice(0, 4);
+    if (following.length < 3 || following.some((candidate) => candidate.attrs?.textAlign !== 'right')) continue;
+    const preceding = nodes
+      .slice(0, index)
+      .filter((candidate) => nodeText(candidate).trim())
+      .slice(-6);
+    if (preceding.filter((candidate) => candidate.attrs?.textAlign === 'right').length > 1) continue;
+    let split = index;
+    while (split > 0 && !nodeText(nodes[split - 1]).trim() && nodes[split - 1].attrs?.textAlign === 'right') {
+      split -= 1;
+    }
+    return split;
+  }
+  return null;
+}
+
+function sectionNode(nodes: JSONContent[], spec: SectionSpec): JSONContent {
+  const attrs: Record<string, unknown> = {
+    columns: spec.columns,
+    columnGapIn: spec.columnGapIn,
+    continuous: spec.continuous,
+    explicitColumns: false,
+  };
+  let content = nodes.length ? nodes : [{ type: 'paragraph' }];
+  if (spec.columnWidthsIn) {
+    attrs.columnWidthsIn = spec.columnWidthsIn;
+    const split = unevenColumnSplit(content, spec.columns);
+    if (split !== null) {
+      attrs.explicitColumns = true;
+      content = [
+        { type: 'documentColumn', content: content.slice(0, split) },
+        { type: 'documentColumn', content: content.slice(split) },
+      ];
+    }
+  }
+  return { type: 'documentSection', attrs, content };
 }
 
 export async function importDocx(
@@ -536,7 +686,8 @@ export async function importDocx(
     numbering: parseNumbering(numberingXml),
     media: new Map(),
   };
-  const content: JSONContent[] = [];
+  let content: JSONContent[] = [];
+  const sectionSegments: Array<{ nodes: JSONContent[]; spec: SectionSpec }> = [];
   const listStack: Array<{
     level: number;
     list: JSONContent;
@@ -556,7 +707,8 @@ export async function importDocx(
       content.push(await importTable(parsed.tbl, context));
       continue;
     }
-    const imported = await importParagraph(parsed.p, context);
+    const ordered = orderedParser.parse(block.xml);
+    const imported = await importParagraph(parsed.p, context, asArray(ordered?.[0]?.p));
     if (imported.list) appendListParagraph(content, imported, listStack);
     else {
       listStack.length = 0;
@@ -566,15 +718,40 @@ export async function importDocx(
       listStack.length = 0;
       content.push({ type: 'pageBreak' });
     }
+    if (parsed.p?.pPr?.sectPr) {
+      sectionSegments.push({ nodes: content, spec: parseSectionSpec(parsed.p.pPr.sectPr) });
+      content = [];
+      listStack.length = 0;
+    }
+  }
+  const parsedDocument = parser.parse(documentXml);
+  if (sectionSegments.length) {
+    sectionSegments.push({
+      nodes: content,
+      spec: parseSectionSpec(parsedDocument?.document?.body?.sectPr),
+    });
+    content = sectionSegments.map((section) => sectionNode(section.nodes, section.spec));
   }
   if (!content.length) content.push({ type: 'paragraph' });
+
+  const compatibilityIssues = detectCompatibility(zip, documentXml, numberingXml);
+  const unevenSections = sectionSegments.filter((section) => section.spec.columnWidthsIn);
+  const unevenColumnsPreserved = unevenSections.length > 0
+    && unevenSections.every((section) => {
+      const node = sectionNode(section.nodes, section.spec);
+      return node.attrs?.explicitColumns === true;
+    });
 
   return {
     schemaVersion: 1,
     title: basenameWithoutExtension(source.displayName),
     source,
-    page: parsePageSettings(documentXml),
-    compatibilityIssues: detectCompatibility(zip, documentXml, numberingXml),
+    page: sectionSegments.length
+      ? { ...parsePageSettings(documentXml), columns: 1 }
+      : parsePageSettings(documentXml),
+    compatibilityIssues: unevenColumnsPreserved
+      ? compatibilityIssues.filter((issue) => issue.code !== 'uneven-columns')
+      : compatibilityIssues,
     content: { type: 'doc', content },
   };
 }

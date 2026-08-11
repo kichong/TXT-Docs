@@ -1,4 +1,4 @@
-import { Extension, Node, mergeAttributes } from '@tiptap/core';
+import { Extension, Node, getStyleProperty, mergeAttributes } from '@tiptap/core';
 import { Color } from '@tiptap/extension-color';
 import { FontFamily } from '@tiptap/extension-font-family';
 import { Highlight } from '@tiptap/extension-highlight';
@@ -12,6 +12,57 @@ import { FontSize, LineHeight, TextStyle } from '@tiptap/extension-text-style';
 import { Underline } from '@tiptap/extension-underline';
 import StarterKit from '@tiptap/starter-kit';
 import { DocumentSearch } from './search-extension';
+import { accessibleTextPreviews, highlightForeground } from './color-contrast';
+
+const AccessibleColor = Color.extend({
+  addGlobalAttributes() {
+    return [
+      {
+        types: this.options.types,
+        attributes: {
+          color: {
+            default: null,
+            parseHTML: (element) => {
+              const value = getStyleProperty(element, 'color') ?? element.style.color;
+              return value?.replace(/['"]+/gu, '');
+            },
+            renderHTML: (attributes) => {
+              if (!attributes.color) return {};
+              const color = String(attributes.color);
+              const previews = accessibleTextPreviews(color);
+              return {
+                'data-text-color': color,
+                style: `--document-text-color: ${color}; --document-text-color-light: ${previews.light}; --document-text-color-dark: ${previews.dark}; color: var(--document-text-color)`,
+              };
+            },
+          },
+        },
+      },
+    ];
+  },
+});
+
+const AccessibleHighlight = Highlight.extend({
+  addAttributes() {
+    return {
+      color: {
+        default: null,
+        parseHTML: (element) =>
+          element.getAttribute('data-color')
+          ?? getStyleProperty(element, 'background-color')
+          ?? element.style.backgroundColor,
+        renderHTML: (attributes) => {
+          if (!attributes.color) return {};
+          const color = String(attributes.color);
+          return {
+            'data-color': color,
+            style: `--highlight-foreground: ${highlightForeground(color)}; background-color: ${color}; color: var(--highlight-foreground)`,
+          };
+        },
+      },
+    };
+  },
+});
 
 export const ParagraphPresentation = Extension.create({
   name: 'paragraphPresentation',
@@ -60,9 +111,71 @@ export const ParagraphPresentation = Extension.create({
                 : {};
             },
           },
+          tabIndentIn: {
+            default: null,
+            parseHTML: (element) => element.getAttribute('data-tab-indent-in'),
+            renderHTML: (attributes) => {
+              const value = Number(attributes.tabIndentIn);
+              return Number.isFinite(value) && value > 0
+                ? { 'data-tab-indent-in': value, style: `margin-left: ${value}in` }
+                : {};
+            },
+          },
         },
       },
     ];
+  },
+});
+
+export const DocumentSection = Node.create({
+  name: 'documentSection',
+  group: 'block',
+  content: 'block+',
+  defining: true,
+  addAttributes() {
+    return {
+      columns: { default: 1 },
+      columnGapIn: { default: 0.5 },
+      columnWidthsIn: { default: null },
+      continuous: { default: false },
+      explicitColumns: { default: false },
+    };
+  },
+  parseHTML() {
+    return [{ tag: 'section[data-document-section]' }];
+  },
+  renderHTML({ HTMLAttributes, node }) {
+    const columns = Math.max(1, Math.min(8, Number(node.attrs.columns) || 1));
+    const gap = Math.max(0, Number(node.attrs.columnGapIn) || 0);
+    const widths = Array.isArray(node.attrs.columnWidthsIn)
+      ? node.attrs.columnWidthsIn.map(Number).filter((value: number) => Number.isFinite(value) && value > 0)
+      : [];
+    const style = widths.length === columns
+      ? `--section-column-template: ${widths.map((width: number) => `${width}fr`).join(' ')}; --section-column-gap: ${gap}in`
+      : `--section-columns: ${columns}; --section-column-gap: ${gap}in`;
+    return [
+      'section',
+      mergeAttributes(HTMLAttributes, {
+        'data-document-section': 'true',
+        'data-columns': columns,
+        'data-explicit-columns': node.attrs.explicitColumns ? 'true' : 'false',
+        style,
+      }),
+      0,
+    ];
+  },
+});
+
+export const DocumentColumn = Node.create({
+  name: 'documentColumn',
+  group: 'block',
+  content: 'block+',
+  defining: true,
+  parseHTML() {
+    return [{ tag: 'div[data-document-column]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-document-column': 'true' }), 0];
   },
 });
 
@@ -117,8 +230,8 @@ export const editorExtensions = [
   FontFamily,
   FontSize,
   LineHeight.configure({ types: ['heading', 'paragraph'] }),
-  Color,
-  Highlight.configure({ multicolor: true }),
+  AccessibleColor,
+  AccessibleHighlight.configure({ multicolor: true }),
   Underline,
   Subscript,
   Superscript,
@@ -135,6 +248,8 @@ export const editorExtensions = [
   TableHeader,
   TableCell,
   ParagraphPresentation,
+  DocumentSection,
+  DocumentColumn,
   PageBreak,
   DocumentSearch,
 ];

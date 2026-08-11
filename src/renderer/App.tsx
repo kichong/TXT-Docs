@@ -18,7 +18,9 @@ import {
   Baseline,
   Bold,
   BookOpenText,
+  ChevronLeft,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   ClipboardPaste,
   Columns3,
@@ -26,6 +28,7 @@ import {
   Download,
   FilePlus2,
   FolderOpen,
+  GripVertical,
   Highlighter,
   ImagePlus,
   Italic,
@@ -39,9 +42,11 @@ import {
   Printer,
   Redo2,
   RefreshCw,
+  RotateCcw,
   Rows3,
   Save,
   Search,
+  Settings2,
   Scissors,
   Strikethrough,
   Subscript,
@@ -69,9 +74,19 @@ import {
   type RecoveryDraft,
 } from '../shared/types';
 import { presentUpdate, type UpdateAction } from '../shared/updates';
+import {
+  DEFAULT_TOOLBAR_PREFERENCES,
+  TOOLBAR_GROUPS,
+  moveToolbarGroup,
+  normalizeToolbarPreferences,
+  type HeadingSizeKey,
+  type ToolbarGroupId,
+  type ToolbarPreferences,
+} from './toolbar-preferences';
 
 type OperationState = 'ready' | 'opening' | 'saving' | 'printing';
 type PasteMode = 'source' | 'merge' | 'text';
+const TOOLBAR_STORAGE_KEY = 'txt-docs:toolbar-preferences:v1';
 
 interface ToolButtonProps {
   label: string;
@@ -198,6 +213,14 @@ function mergeClipboardHtml(html: string): string {
 
 const FONT_FAMILIES = ['Aptos', 'Arial', 'Calibri', 'Cambria', 'Georgia', 'Times New Roman', 'Verdana'];
 const FONT_SIZES = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '32', '36', '48', '64'];
+const BLOCK_STYLES = {
+  normal: { fontSize: 11, lineHeight: '1.15', spacingBeforePt: 0, spacingAfterPt: 8 },
+  'no-spacing': { fontSize: 11, lineHeight: '1', spacingBeforePt: 0, spacingAfterPt: 0 },
+  title: { fontSize: 28, lineHeight: '1.1', spacingBeforePt: 0, spacingAfterPt: 14 },
+  'heading-1': { fontSize: 24, lineHeight: '1.18', spacingBeforePt: 20, spacingAfterPt: 8 },
+  'heading-2': { fontSize: 18, lineHeight: '1.22', spacingBeforePt: 16, spacingAfterPt: 6 },
+  'heading-3': { fontSize: 14, lineHeight: '1.25', spacingBeforePt: 13, spacingAfterPt: 5 },
+} as const;
 const TEXT_COLORS = ['#202124', '#5f6368', '#d93025', '#e37400', '#188038', '#1a73e8', '#7b1fa2', '#ffffff'];
 const HIGHLIGHT_COLORS = ['#fff176', '#ffcc80', '#ff8a80', '#c5e1a5', '#80deea', '#90caf9', '#ce93d8', '#e0e0e0'];
 
@@ -328,6 +351,15 @@ function safeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function loadToolbarPreferences(): ToolbarPreferences {
+  try {
+    const stored = window.localStorage.getItem(TOOLBAR_STORAGE_KEY);
+    return stored ? normalizeToolbarPreferences(JSON.parse(stored)) : structuredClone(DEFAULT_TOOLBAR_PREFERENCES);
+  } catch {
+    return structuredClone(DEFAULT_TOOLBAR_PREFERENCES);
+  }
+}
+
 export function App() {
   const [document, setDocument] = useState<EditorDocumentV1>(() => createBlankDocument());
   const documentRef = useRef(document);
@@ -354,9 +386,17 @@ export function App() {
     canCheck: false,
   });
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
+  const [toolbarPreferences, setToolbarPreferences] = useState<ToolbarPreferences>(loadToolbarPreferences);
+  const toolbarPreferencesRef = useRef(toolbarPreferences);
+  const [toolbarCustomizeOpen, setToolbarCustomizeOpen] = useState(false);
+  const draggedToolbarGroup = useRef<ToolbarGroupId | null>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const initialExternalOpenChecked = useRef(false);
   const plainTextMode = document.source?.format === 'txt' || document.source?.format === 'md';
+  const hasSectionLayout = useMemo(
+    () => (document.content.content ?? []).some((node) => node.type === 'documentSection'),
+    [document.content],
+  );
 
   const editor = useEditor({
     extensions: editorExtensions,
@@ -378,6 +418,11 @@ export function App() {
       setDirty(true);
     },
   });
+
+  useEffect(() => {
+    toolbarPreferencesRef.current = toolbarPreferences;
+    window.localStorage.setItem(TOOLBAR_STORAGE_KEY, JSON.stringify(toolbarPreferences));
+  }, [toolbarPreferences]);
 
   useEffect(() => {
     documentRef.current = document;
@@ -581,7 +626,10 @@ export function App() {
     if (!editor) return;
     setOperation('printing');
     try {
-      const result = await window.documentsApi.printDocument({ html: editor.getHTML() });
+      const result = await window.documentsApi.printDocument({
+        html: editor.getHTML(),
+        page: documentRef.current.page,
+      });
       if (result.status === 'failed') setError(result.error ?? 'Printing failed.');
     } catch (printError) {
       setError(safeError(printError));
@@ -620,16 +668,54 @@ export function App() {
   const setStyle = useCallback(
     (style: string) => {
       if (!editor) return;
-      const chain = editor.chain().focus();
-      if (style.startsWith('heading-')) {
-        chain.setHeading({ level: Number(style.slice(-1)) as 1 | 2 | 3 }).run();
-      } else {
-        chain.setParagraph().updateAttributes('paragraph', {
-          paragraphStyle: style === 'no-spacing' || style === 'title' ? style : null,
-        }).run();
+      const baseStyle = BLOCK_STYLES[style as keyof typeof BLOCK_STYLES] ?? BLOCK_STYLES.normal;
+      const customizedSize = style === 'title'
+        ? toolbarPreferences.headingSizes.title
+        : style === 'heading-1'
+          ? toolbarPreferences.headingSizes.h1
+          : style === 'heading-2'
+            ? toolbarPreferences.headingSizes.h2
+            : style === 'heading-3'
+              ? toolbarPreferences.headingSizes.h3
+              : baseStyle.fontSize;
+      const selectedStyle = { ...baseStyle, fontSize: customizedSize };
+      const originalSelection = { from: editor.state.selection.from, to: editor.state.selection.to };
+      let rangeFrom = Number.POSITIVE_INFINITY;
+      let rangeTo = Number.NEGATIVE_INFINITY;
+      editor.state.doc.nodesBetween(originalSelection.from, originalSelection.to, (node, position) => {
+        if (!node.isTextblock) return;
+        rangeFrom = Math.min(rangeFrom, position + 1);
+        rangeTo = Math.max(rangeTo, position + node.nodeSize - 1);
+      });
+      if (!Number.isFinite(rangeFrom) || !Number.isFinite(rangeTo)) {
+        rangeFrom = editor.state.selection.$from.start();
+        rangeTo = editor.state.selection.$from.end();
       }
+      const chain = editor.chain().focus().setTextSelection({ from: rangeFrom, to: rangeTo });
+      if (style.startsWith('heading-')) {
+        chain
+          .setHeading({ level: Number(style.slice(-1)) as 1 | 2 | 3 })
+          .updateAttributes('heading', {
+            lineHeight: selectedStyle.lineHeight,
+            spacingBeforePt: selectedStyle.spacingBeforePt,
+            spacingAfterPt: selectedStyle.spacingAfterPt,
+          });
+      } else {
+        chain
+          .setParagraph()
+          .updateAttributes('paragraph', {
+            paragraphStyle: style === 'no-spacing' || style === 'title' ? style : null,
+            lineHeight: selectedStyle.lineHeight,
+            spacingBeforePt: selectedStyle.spacingBeforePt,
+            spacingAfterPt: selectedStyle.spacingAfterPt,
+          });
+      }
+      chain
+        .setFontSize(`${selectedStyle.fontSize}pt`)
+        .setTextSelection(originalSelection)
+        .run();
     },
-    [editor],
+    [editor, toolbarPreferences.headingSizes],
   );
 
   const selectedBlock = editor?.state.selection.$from.parent;
@@ -660,6 +746,77 @@ export function App() {
     },
     [editor],
   );
+
+  const setPageColumns = useCallback((value: string) => {
+    const columns = Math.max(1, Math.min(8, Number(value) || 1));
+    setDocument((current) => {
+      const next = { ...current, page: { ...current.page, columns } };
+      documentRef.current = next;
+      return next;
+    });
+    setDirty(true);
+  }, []);
+
+  const toggleToolbarGroup = useCallback((group: ToolbarGroupId) => {
+    setToolbarPreferences((current) => ({
+      ...current,
+      visible: current.visible.includes(group)
+        ? current.visible.filter((id) => id !== group)
+        : [...current.visible, group],
+    }));
+  }, []);
+
+  const shiftToolbarGroup = useCallback((group: ToolbarGroupId, direction: -1 | 1) => {
+    setToolbarPreferences((current) => {
+      const index = current.order.indexOf(group);
+      const target = current.order[index + direction];
+      if (!target) return current;
+      const order = [...current.order];
+      [order[index], order[index + direction]] = [order[index + direction], order[index]];
+      return { ...current, order };
+    });
+  }, []);
+
+  const setHeadingSize = useCallback((key: HeadingSizeKey, value: number) => {
+    if (!Number.isFinite(value)) return;
+    const size = Math.round(value);
+    const current = toolbarPreferencesRef.current;
+    const next = { ...current, headingSizes: { ...current.headingSizes, [key]: size } };
+    toolbarPreferencesRef.current = next;
+    setToolbarPreferences(next);
+  }, []);
+
+  const applyHeadingSizesToDocument = useCallback(() => {
+    if (!editor) return;
+    const textStyle = editor.schema.marks.textStyle;
+    if (!textStyle) return;
+    const transaction = editor.state.tr;
+    let changed = false;
+    const headingSizes = toolbarPreferencesRef.current.headingSizes;
+    editor.state.doc.descendants((node, position) => {
+      const size = node.type.name === 'heading'
+        ? headingSizes[`h${Number(node.attrs.level)}` as HeadingSizeKey]
+        : node.type.name === 'paragraph' && node.attrs.paragraphStyle === 'title'
+          ? headingSizes.title
+          : undefined;
+      if (!size) return;
+      node.descendants((child, relativePosition) => {
+        if (!child.isText) return;
+        const from = position + 1 + relativePosition;
+        const to = from + child.nodeSize;
+        const existing = child.marks.find((mark) => mark.type === textStyle);
+        if (existing) transaction.removeMark(from, to, existing);
+        transaction.addMark(from, to, textStyle.create({ ...existing?.attrs, fontSize: `${size}pt` }));
+        changed = true;
+      });
+    });
+    if (changed) {
+      editor.view.dispatch(transaction);
+      setNotice('Applied the heading sizes to this document.');
+    } else {
+      setNotice('No headings found in this document.');
+    }
+  }, [editor]);
 
   const pasteWithMode = useCallback(async (mode: PasteMode) => {
     if (!editor) return;
@@ -816,9 +973,76 @@ export function App() {
     return <main className="boot-screen">Preparing your document…</main>;
   }
 
+  const toolbarGroupContent = (group: ToolbarGroupId): ReactNode => {
+    if (group === 'history') return <>
+      <ToolButton label="Undo" icon={<Undo2 size={17} />} onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} />
+      <ToolButton label="Redo" icon={<Redo2 size={17} />} onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} />
+      <ToolButton label="Cut" icon={<Scissors size={16} />} onClick={() => globalThis.document.execCommand('cut')} />
+      <ToolButton label="Copy" icon={<Copy size={16} />} onClick={() => globalThis.document.execCommand('copy')} />
+    </>;
+    if (group === 'paste') return <PasteOptions onPaste={(mode) => void pasteWithMode(mode)} />;
+    if (group === 'type') return <>
+      <SelectControl label="Paragraph style" value={styleValue} onChange={setStyle} className="style-select">
+        <option value="normal">Normal</option><option value="no-spacing">No Spacing</option><option value="title">Title</option>
+        <option value="heading-1">Heading 1</option><option value="heading-2">Heading 2</option><option value="heading-3">Heading 3</option>
+      </SelectControl>
+      <SelectControl label="Font family" value={selectionFont} onChange={(value) => editor.chain().focus().setFontFamily(value).run()} className="font-select">
+        {availableFonts.map((font) => <option key={font}>{font}</option>)}
+      </SelectControl>
+      <SelectControl label="Font size" value={selectionSize} onChange={(value) => editor.chain().focus().setFontSize(`${value}pt`).run()} className="size-select">
+        {availableSizes.map((size) => <option key={size}>{size}</option>)}
+      </SelectControl>
+    </>;
+    if (group === 'emphasis') return <>
+      <ToolButton label="Bold" icon={<Bold size={17} />} active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()} />
+      <ToolButton label="Italic" icon={<Italic size={17} />} active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()} />
+      <ToolButton label="Underline" icon={<Underline size={17} />} active={editor.isActive('underline')} onClick={() => editor.chain().focus().toggleUnderline().run()} />
+      <ToolButton label="Strikethrough" icon={<Strikethrough size={17} />} active={editor.isActive('strike')} onClick={() => editor.chain().focus().toggleStrike().run()} />
+      <ToolButton label="Subscript" icon={<Subscript size={17} />} active={editor.isActive('subscript')} onClick={() => editor.chain().focus().toggleSubscript().run()} />
+      <ToolButton label="Superscript" icon={<Superscript size={17} />} active={editor.isActive('superscript')} onClick={() => editor.chain().focus().toggleSuperscript().run()} />
+      <ColorPalette label="Text color" icon={<Baseline size={18} />} colors={TEXT_COLORS} value={String(editor.getAttributes('textStyle').color ?? (darkMode ? '#f3f4f6' : '#202124'))} onSelect={(color) => editor.chain().focus().setColor(color).run()} />
+      <ColorPalette label="Highlight color" icon={<Highlighter size={18} />} colors={HIGHLIGHT_COLORS} value={String(editor.getAttributes('highlight').color ?? '#fff176')} onSelect={(color) => editor.chain().focus().setHighlight({ color }).run()} />
+    </>;
+    if (group === 'paragraph') return <>
+      <ToolButton label="Bulleted list" icon={<List size={18} />} active={editor.isActive('bulletList')} onClick={() => editor.chain().focus().toggleBulletList().run()} />
+      <ToolButton label="Numbered list" icon={<ListOrdered size={18} />} active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()} />
+      <ToolbarSubdivider />
+      <ToolButton label="Decrease indent" icon={<ArrowLeftToLine size={18} />} className="indent-tool" onClick={() => adjustIndent(-1)} />
+      <ToolButton label="Increase indent" icon={<ArrowRightToLine size={18} />} className="indent-tool" onClick={() => adjustIndent(1)} />
+      <ToolbarSubdivider />
+      <ToolButton label="Align left" icon={<AlignLeft size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'left' })} onClick={() => editor.chain().focus().setTextAlign('left').run()} />
+      <ToolButton label="Align center" icon={<AlignCenter size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'center' })} onClick={() => editor.chain().focus().setTextAlign('center').run()} />
+      <ToolButton label="Align right" icon={<AlignRight size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'right' })} onClick={() => editor.chain().focus().setTextAlign('right').run()} />
+      <ToolButton label="Justify" icon={<AlignJustify size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'justify' })} onClick={() => editor.chain().focus().setTextAlign('justify').run()} />
+      <SelectControl label="Line spacing" value={['1', '1.15', '1.5', '2'].includes(lineHeight) ? lineHeight : '1.15'} onChange={(value) => editor.chain().focus().setLineHeight(value).run()} className="line-select">
+        <option value="1">1.0</option><option value="1.15">1.15</option><option value="1.5">1.5</option><option value="2">2.0</option>
+      </SelectControl>
+      <ToolButton label="Clear formatting" icon={<Pilcrow size={18} />} onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()} />
+    </>;
+    if (group === 'insert') return <>
+      <ToolButton label="Add or edit link" icon={<Link2 size={17} />} active={editor.isActive('link')} onClick={() => {
+        const current = String(editor.getAttributes('link').href ?? 'https://');
+        const href = window.prompt('Link address', current);
+        if (href) editor.chain().focus().extendMarkRange('link').setLink({ href }).run();
+      }} />
+      <ToolButton label="Remove link" icon={<Unlink size={17} />} disabled={!editor.isActive('link')} onClick={() => editor.chain().focus().unsetLink().run()} />
+      <ToolButton label="Insert image" icon={<ImagePlus size={18} />} onClick={() => void insertImage()} />
+      <TablePicker onInsert={(rows, cols) => editor.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()} />
+      <ToolButton label="Insert page break" icon={<BookOpenText size={18} />} onClick={() => editor.chain().focus().insertContent([{ type: 'pageBreak' }, { type: 'paragraph' }]).focus('end').run()} />
+      {editor.isActive('table') && <>
+        <ToolButton label="Add table row" icon={<Rows3 size={17} />} onClick={() => editor.chain().focus().addRowAfter().run()} />
+        <ToolButton label="Add table column" icon={<Columns3 size={17} />} onClick={() => editor.chain().focus().addColumnAfter().run()} />
+        <ToolButton label="Delete table" icon={<Trash2 size={17} />} onClick={() => editor.chain().focus().deleteTable().run()} />
+      </>}
+    </>;
+    return <SelectControl label="Page columns" value={String(Math.max(1, Math.min(8, document.page.columns ?? 1)))} onChange={setPageColumns} className="columns-select" disabled={hasSectionLayout}>
+      {Array.from({ length: 8 }, (_, index) => index + 1).map((columns) => <option key={columns} value={columns}>{columns} {columns === 1 ? 'column' : 'columns'}</option>)}
+    </SelectControl>;
+  };
+
   return (
     <div className={darkMode ? 'app theme-dark' : 'app theme-light'}>
-      <header className="app-header">
+      <header className={`app-header${toolbarCustomizeOpen ? ' has-toolbar-customizer' : ''}`}>
         <div className="titlebar">
           <div className="titlebar-file-actions" aria-label="File actions">
             <ToolButton label="New document" icon={<FilePlus2 size={19} />} onClick={createNew} disabled={busy} />
@@ -855,130 +1079,112 @@ export function App() {
               onClick={() => setDarkMode((value) => !value)}
               subtle
             />
+            <div className="toolbar-customize-anchor">
+              <ToolButton
+                label="Customize toolbar"
+                icon={<Settings2 size={17} />}
+                active={toolbarCustomizeOpen}
+                onClick={() => setToolbarCustomizeOpen((open) => !open)}
+                subtle
+              />
+              {toolbarCustomizeOpen && (
+                <aside className="toolbar-customizer" aria-label="Customize toolbar">
+                  <div className="toolbar-customizer-header">
+                    <div><strong>Customize toolbar</strong><span>Keep only what you use.</span></div>
+                    <button type="button" aria-label="Close toolbar customization" onClick={() => setToolbarCustomizeOpen(false)}><X size={16} /></button>
+                  </div>
+                  <label className="toolbar-visibility-toggle">
+                    <input
+                      type="checkbox"
+                      checked={toolbarPreferences.expanded}
+                      onChange={(event) => setToolbarPreferences((current) => ({ ...current, expanded: event.target.checked }))}
+                    />
+                    <span><strong>Show formatting toolbar</strong><small>Hide the entire row for a distraction-free view.</small></span>
+                  </label>
+                  <div className="toolbar-customizer-section">
+                    <div className="toolbar-customizer-label"><strong>Tool chunks</strong><span>Show, hide, or move.</span></div>
+                    <div className="toolbar-chunk-list">
+                      {toolbarPreferences.order.map((group, index) => {
+                        const metadata = TOOLBAR_GROUPS.find((item) => item.id === group)!;
+                        return (
+                          <div
+                            className="toolbar-chunk-row"
+                            key={group}
+                            draggable
+                            onDragStart={() => { draggedToolbarGroup.current = group; }}
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={() => {
+                              const dragged = draggedToolbarGroup.current;
+                              if (dragged) setToolbarPreferences((current) => ({ ...current, order: moveToolbarGroup(current.order, dragged, group) }));
+                              draggedToolbarGroup.current = null;
+                            }}
+                          >
+                            <GripVertical size={15} aria-hidden="true" />
+                            <label>
+                              <input type="checkbox" checked={toolbarPreferences.visible.includes(group)} onChange={() => toggleToolbarGroup(group)} />
+                              <span>{metadata.label}</span>
+                            </label>
+                            {'optional' in metadata && metadata.optional && <small>Optional</small>}
+                            <div className="toolbar-order-actions">
+                              <button type="button" aria-label={`Move ${metadata.label} left`} disabled={index === 0} onClick={() => shiftToolbarGroup(group, -1)}><ChevronLeft size={14} /></button>
+                              <button type="button" aria-label={`Move ${metadata.label} right`} disabled={index === toolbarPreferences.order.length - 1} onClick={() => shiftToolbarGroup(group, 1)}><ChevronRight size={14} /></button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="toolbar-customizer-section heading-size-settings">
+                    <div className="toolbar-customizer-label"><strong>Heading sizes</strong><span>Defaults for this toolbar.</span></div>
+                    <div className="heading-size-grid">
+                      {([['title', 'Title'], ['h1', 'H1'], ['h2', 'H2'], ['h3', 'H3']] as Array<[HeadingSizeKey, string]>).map(([key, label]) => (
+                        <label key={key}><span>{label}</span><input type="number" min="8" max="96" value={toolbarPreferences.headingSizes[key]} onChange={(event) => { if (event.target.value !== '') setHeadingSize(key, Number(event.target.value)); }} onBlur={(event) => setHeadingSize(key, Math.max(8, Math.min(96, Number(event.target.value) || DEFAULT_TOOLBAR_PREFERENCES.headingSizes[key])))} /><small>pt</small></label>
+                      ))}
+                    </div>
+                    <button type="button" className="apply-heading-sizes" onClick={applyHeadingSizesToDocument}>Apply sizes to this document</button>
+                  </div>
+                  <button
+                    type="button"
+                    className="toolbar-reset-button"
+                    onClick={() => setToolbarPreferences(structuredClone(DEFAULT_TOOLBAR_PREFERENCES))}
+                  >
+                    <RotateCcw size={14} /> Reset toolbar
+                  </button>
+                </aside>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="toolbar" aria-label="Document formatting">
-          <div className="toolbar-group">
-            <ToolButton label="Undo" icon={<Undo2 size={17} />} onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} />
-            <ToolButton label="Redo" icon={<Redo2 size={17} />} onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} />
-            <ToolButton label="Cut" icon={<Scissors size={16} />} onClick={() => globalThis.document.execCommand('cut')} />
-            <ToolButton label="Copy" icon={<Copy size={16} />} onClick={() => globalThis.document.execCommand('copy')} />
-            <PasteOptions onPaste={(mode) => void pasteWithMode(mode)} />
+        {toolbarPreferences.expanded && (
+          <div className={`toolbar customizable-toolbar${toolbarCustomizeOpen ? ' is-customizing' : ''}`} aria-label="Document formatting">
+            {toolbarPreferences.order.filter((group) => toolbarPreferences.visible.includes(group)).map((group, index) => {
+              const metadata = TOOLBAR_GROUPS.find((item) => item.id === group)!;
+              const richOnly = group !== 'history' && group !== 'paste';
+              return (
+                <div
+                  className="toolbar-chunk"
+                  key={group}
+                  draggable={toolbarCustomizeOpen}
+                  data-toolbar-group={group}
+                  onDragStart={() => { draggedToolbarGroup.current = group; }}
+                  onDragOver={(event) => { if (toolbarCustomizeOpen) event.preventDefault(); }}
+                  onDrop={() => {
+                    const dragged = draggedToolbarGroup.current;
+                    if (dragged) setToolbarPreferences((current) => ({ ...current, order: moveToolbarGroup(current.order, dragged, group) }));
+                    draggedToolbarGroup.current = null;
+                  }}
+                >
+                  {index > 0 && <ToolbarDivider />}
+                  {toolbarCustomizeOpen && <span className="toolbar-chunk-grip" title={`Move ${metadata.label}`}><GripVertical size={13} /></span>}
+                  <fieldset className="toolbar-group toolbar-chunk-controls" disabled={plainTextMode && richOnly} aria-label={metadata.label}>
+                    {toolbarGroupContent(group)}
+                  </fieldset>
+                </div>
+              );
+            })}
           </div>
-          <ToolbarDivider />
-          <fieldset className="formatting-tools" disabled={plainTextMode}>
-          <div className="toolbar-group format-selectors">
-            <SelectControl label="Paragraph style" value={styleValue} onChange={setStyle} className="style-select">
-              <option value="normal">Normal</option>
-              <option value="no-spacing">No Spacing</option>
-              <option value="title">Title</option>
-              <option value="heading-1">Heading 1</option>
-              <option value="heading-2">Heading 2</option>
-              <option value="heading-3">Heading 3</option>
-            </SelectControl>
-            <SelectControl
-              label="Font family"
-              value={selectionFont}
-              onChange={(value) => editor.chain().focus().setFontFamily(value).run()}
-              className="font-select"
-            >
-              {availableFonts.map((font) => <option key={font}>{font}</option>)}
-            </SelectControl>
-            <SelectControl
-              label="Font size"
-              value={selectionSize}
-              onChange={(value) => editor.chain().focus().setFontSize(`${value}pt`).run()}
-              className="size-select"
-            >
-              {availableSizes.map((size) => <option key={size}>{size}</option>)}
-            </SelectControl>
-          </div>
-          <ToolbarDivider />
-          <div className="toolbar-group">
-            <ToolButton label="Bold" icon={<Bold size={17} />} active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()} />
-            <ToolButton label="Italic" icon={<Italic size={17} />} active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()} />
-            <ToolButton label="Underline" icon={<Underline size={17} />} active={editor.isActive('underline')} onClick={() => editor.chain().focus().toggleUnderline().run()} />
-            <ToolButton label="Strikethrough" icon={<Strikethrough size={17} />} active={editor.isActive('strike')} onClick={() => editor.chain().focus().toggleStrike().run()} />
-            <ToolButton label="Subscript" icon={<Subscript size={17} />} active={editor.isActive('subscript')} onClick={() => editor.chain().focus().toggleSubscript().run()} />
-            <ToolButton label="Superscript" icon={<Superscript size={17} />} active={editor.isActive('superscript')} onClick={() => editor.chain().focus().toggleSuperscript().run()} />
-            <ColorPalette
-              label="Text color"
-              icon={<Baseline size={18} />}
-              colors={TEXT_COLORS}
-              value={String(editor.getAttributes('textStyle').color ?? (darkMode ? '#f3f4f6' : '#202124'))}
-              onSelect={(color) => editor.chain().focus().setColor(color).run()}
-            />
-            <ColorPalette
-              label="Highlight color"
-              icon={<Highlighter size={18} />}
-              colors={HIGHLIGHT_COLORS}
-              value={String(editor.getAttributes('highlight').color ?? '#fff176')}
-              onSelect={(color) => editor.chain().focus().setHighlight({ color }).run()}
-            />
-          </div>
-          <ToolbarDivider />
-          <div className="toolbar-group">
-            <ToolButton label="Bulleted list" icon={<List size={18} />} active={editor.isActive('bulletList')} onClick={() => editor.chain().focus().toggleBulletList().run()} />
-            <ToolButton label="Numbered list" icon={<ListOrdered size={18} />} active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()} />
-            <ToolbarSubdivider />
-            <ToolButton label="Decrease indent" icon={<ArrowLeftToLine size={18} />} className="indent-tool" onClick={() => adjustIndent(-1)} />
-            <ToolButton label="Increase indent" icon={<ArrowRightToLine size={18} />} className="indent-tool" onClick={() => adjustIndent(1)} />
-            <ToolbarSubdivider />
-            <ToolButton label="Align left" icon={<AlignLeft size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'left' })} onClick={() => editor.chain().focus().setTextAlign('left').run()} />
-            <ToolButton label="Align center" icon={<AlignCenter size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'center' })} onClick={() => editor.chain().focus().setTextAlign('center').run()} />
-            <ToolButton label="Align right" icon={<AlignRight size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'right' })} onClick={() => editor.chain().focus().setTextAlign('right').run()} />
-            <ToolButton label="Justify" icon={<AlignJustify size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'justify' })} onClick={() => editor.chain().focus().setTextAlign('justify').run()} />
-            <SelectControl
-              label="Line spacing"
-              value={['1', '1.15', '1.5', '2'].includes(lineHeight) ? lineHeight : '1.15'}
-              onChange={(value) => editor.chain().focus().setLineHeight(value).run()}
-              className="line-select"
-            >
-              <option value="1">1.0</option>
-              <option value="1.15">1.15</option>
-              <option value="1.5">1.5</option>
-              <option value="2">2.0</option>
-            </SelectControl>
-            <ToolButton label="Clear formatting" icon={<Pilcrow size={18} />} onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()} />
-          </div>
-          <ToolbarDivider />
-          <div className="toolbar-group">
-            <ToolButton
-              label="Add or edit link"
-              icon={<Link2 size={17} />}
-              active={editor.isActive('link')}
-              onClick={() => {
-                const current = String(editor.getAttributes('link').href ?? 'https://');
-                const href = window.prompt('Link address', current);
-                if (href) editor.chain().focus().extendMarkRange('link').setLink({ href }).run();
-              }}
-            />
-            <ToolButton label="Remove link" icon={<Unlink size={17} />} disabled={!editor.isActive('link')} onClick={() => editor.chain().focus().unsetLink().run()} />
-            <ToolButton label="Insert image" icon={<ImagePlus size={18} />} onClick={() => void insertImage()} />
-            <TablePicker onInsert={(rows, cols) => editor.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()} />
-            <ToolButton
-              label="Insert page break"
-              icon={<BookOpenText size={18} />}
-              onClick={() =>
-                editor
-                  .chain()
-                  .focus()
-                  .insertContent([{ type: 'pageBreak' }, { type: 'paragraph' }])
-                  .focus('end')
-                  .run()
-              }
-            />
-            {editor.isActive('table') && (
-              <>
-                <ToolButton label="Add table row" icon={<Rows3 size={17} />} onClick={() => editor.chain().focus().addRowAfter().run()} />
-                <ToolButton label="Add table column" icon={<Columns3 size={17} />} onClick={() => editor.chain().focus().addColumnAfter().run()} />
-                <ToolButton label="Delete table" icon={<Trash2 size={17} />} onClick={() => editor.chain().focus().deleteTable().run()} />
-              </>
-            )}
-          </div>
-          </fieldset>
-        </div>
+        )}
         {findOpen && (
           <form
             className="find-bar"
@@ -1135,7 +1341,13 @@ export function App() {
             className="paper-scale"
             style={{ '--document-zoom': zoom } as React.CSSProperties}
           >
-            <article className={`paper${plainTextMode ? ' is-plain-text' : ''}`}>
+            <article
+              className={`paper${plainTextMode ? ' is-plain-text' : ''}${hasSectionLayout ? ' has-section-layout' : ''}`}
+              style={{
+                '--document-columns': document.page.columns ?? 1,
+                '--document-column-gap': `${document.page.columnGapIn ?? 0.5}in`,
+              } as React.CSSProperties}
+            >
               <EditorContent editor={editor} />
             </article>
           </div>

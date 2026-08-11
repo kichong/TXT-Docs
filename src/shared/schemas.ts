@@ -30,20 +30,24 @@ const sourceSchema = z.object({
   legacyImported: z.boolean(),
 });
 
+const pageSettingsSchema = z.object({
+  size: z.literal('letter'),
+  orientation: z.literal('portrait'),
+  columns: z.number().int().min(1).max(8).default(1),
+  columnGapIn: z.number().min(0).max(4).default(0.5),
+  marginsIn: z.object({
+    top: z.number().min(0).max(4),
+    right: z.number().min(0).max(4),
+    bottom: z.number().min(0).max(4),
+    left: z.number().min(0).max(4),
+  }),
+});
+
 export const editorDocumentSchema = z.object({
   schemaVersion: z.literal(1),
   title: z.string().max(500),
   content: jsonContentSchema,
-  page: z.object({
-    size: z.literal('letter'),
-    orientation: z.literal('portrait'),
-    marginsIn: z.object({
-      top: z.number().min(0).max(4),
-      right: z.number().min(0).max(4),
-      bottom: z.number().min(0).max(4),
-      left: z.number().min(0).max(4),
-    }),
-  }),
+  page: pageSettingsSchema,
   source: sourceSchema.optional(),
   compatibilityIssues: z.array(compatibilityIssueSchema).max(100),
 });
@@ -56,6 +60,7 @@ export const saveRequestSchema = z.object({
 
 export const printRequestSchema = z.object({
   html: z.string().max(50_000_000),
+  page: pageSettingsSchema,
 });
 
 export const appUpdateStateSchema = z.object({
