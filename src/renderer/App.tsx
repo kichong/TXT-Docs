@@ -1044,6 +1044,7 @@ export function App() {
     <div className={darkMode ? 'app theme-dark' : 'app theme-light'}>
       <header className={`app-header${toolbarCustomizeOpen ? ' has-toolbar-customizer' : ''}`}>
         <div className="titlebar">
+          <img className="brand-mark" src="./txt-docs-logo.svg" alt="" aria-hidden="true" />
           <div className="titlebar-file-actions" aria-label="File actions">
             <ToolButton label="New document" icon={<FilePlus2 size={19} />} onClick={createNew} disabled={busy} />
             <ToolButton label="Open document" icon={<FolderOpen size={19} />} onClick={() => void openDocument()} disabled={busy} />

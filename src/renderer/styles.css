@@ -118,7 +118,7 @@ select:focus-visible,
 
 .titlebar {
   display: grid;
-  grid-template-columns: auto minmax(220px, 1fr) auto;
+  grid-template-columns: auto auto minmax(220px, 1fr) auto;
   align-items: center;
   min-height: 47px;
   min-width: 0;
@@ -156,13 +156,10 @@ select:focus-visible,
 }
 
 .brand-mark {
-  display: grid;
+  display: block;
   width: 29px;
   height: 29px;
-  place-items: center;
-  color: white;
-  background: var(--accent);
-  border-radius: 8px;
+  flex: 0 0 auto;
 }
 
 .file-menu-anchor {
@@ -1716,7 +1713,7 @@ select:focus-visible,
 
 @media (max-width: 1120px) {
   .titlebar {
-    grid-template-columns: auto minmax(180px, 1fr) auto;
+    grid-template-columns: auto auto minmax(180px, 1fr) auto;
   }
 
   .save-state {
