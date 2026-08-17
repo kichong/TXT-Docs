@@ -3,7 +3,9 @@ node_modules/
 out/
 dist/
 release/
+output/
 coverage/
+build/icon-256.png
 *.log
 tmp/
 .DS_Store
