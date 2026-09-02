@@ -1,3 +1,6 @@
 allowBuilds:
   electron-winstaller: true
   sharp: true
+
+overrides:
+  js-yaml: 4.3.1
