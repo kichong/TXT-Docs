@@ -17,11 +17,13 @@ import { convertLegacyDoc, getLegacyConverterStatus } from './main/legacy-conver
 import { LocalDocumentStorage } from './main/storage';
 import { findLaunchDocumentPath } from './main/launch-files';
 import { contentToPlainText, plainTextToContent } from './shared/plain-text';
-import { editorDocumentSchema, printRequestSchema, saveRequestSchema } from './shared/schemas';
+import { buildCompatibilityReportUrl } from './shared/compatibility-report';
+import { compatibilityReportRequestSchema, editorDocumentSchema, printRequestSchema, saveRequestSchema } from './shared/schemas';
 import { DEFAULT_PAGE_SETTINGS } from './shared/types';
 import { AppUpdateManager } from './main/updater';
 import type {
   AppCommand,
+  CompatibilityReportRequest,
   DocumentFormat,
   EditorDocumentV1,
   ImageAsset,
@@ -348,6 +350,16 @@ function installIpcHandlers(): void {
     return path
       ? saveToPath(parsed, path)
       : ({ status: 'cancelled', recentFiles: await storage.getRecentFiles() } satisfies SaveResult);
+  });
+  ipcMain.handle('documents:report-compatibility', async (_event, request: unknown) => {
+    const parsed = compatibilityReportRequestSchema.parse(request) as CompatibilityReportRequest;
+    await shell.openExternal(buildCompatibilityReportUrl({
+      ...parsed,
+      appName: 'TXT Docs',
+      appVersion: app.getVersion(),
+      operatingSystem: `${process.platform} ${process.getSystemVersion()}`,
+      repositoryUrl: 'https://github.com/kichong/TXT-Docs',
+    }));
   });
   ipcMain.handle('documents:print', async (_event, request: unknown): Promise<PrintResult> => {
     const parsed = printRequestSchema.parse(request) as PrintRequest;

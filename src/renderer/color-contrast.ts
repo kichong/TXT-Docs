@@ -51,10 +51,10 @@ export function contrastRatio(foreground: string, background: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-function accessibleColor(value: string, background: string): string {
+function accessibleColor(value: string, background: string, targetContrast = 4.5): string {
   const color = parseColor(value);
   const paper = parseColor(background);
-  if (!color || !paper || contrastRatio(value, background) >= 4.5) return value;
+  if (!color || !paper || contrastRatio(value, background) >= targetContrast) return value;
   const target: RGB = luminance(paper) > 0.5
     ? { r: 0, g: 0, b: 0 }
     : { r: 255, g: 255, b: 255 };
@@ -65,7 +65,7 @@ function accessibleColor(value: string, background: string): string {
       g: color.g + (target.g - color.g) * amount,
       b: color.b + (target.b - color.b) * amount,
     });
-    if (contrastRatio(candidate, background) >= 4.5) return candidate;
+    if (contrastRatio(candidate, background) >= targetContrast) return candidate;
   }
   return toHex(target);
 }
@@ -73,7 +73,7 @@ function accessibleColor(value: string, background: string): string {
 export function accessibleTextPreviews(value: string): { light: string; dark: string } {
   return {
     light: accessibleColor(value, LIGHT_PAPER),
-    dark: accessibleColor(value, DARK_PAPER),
+    dark: accessibleColor(value, DARK_PAPER, 7),
   };
 }
 

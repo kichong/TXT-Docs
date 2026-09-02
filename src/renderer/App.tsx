@@ -16,6 +16,7 @@ import {
   ArrowLeftToLine,
   ArrowRightToLine,
   Baseline,
+  Bug,
   Bold,
   BookOpenText,
   ChevronLeft,
@@ -337,7 +338,7 @@ function TablePicker({ onInsert }: TablePickerProps) {
 
 function issueSummary(issues: CompatibilityIssue[]): string {
   if (!issues.length) return 'All detected content is supported by TXT Docs v1.';
-  return `${issues.length} compatibility ${issues.length === 1 ? 'notice' : 'notices'}. Save As is recommended.`;
+  return `${issues.length} compatibility ${issues.length === 1 ? 'note' : 'notes'} to review before saving.`;
 }
 
 function operationLabel(state: OperationState): string {
@@ -500,11 +501,8 @@ export function App() {
       documentRef.current = result.document;
       setDirty(false);
       setError(null);
-      setNotice(
-        result.document.compatibilityIssues.length
-          ? issueSummary(result.document.compatibilityIssues)
-          : `Opened ${result.document.source?.displayName ?? result.document.title}.`,
-      );
+      setCompatibilityOpen(false);
+      setNotice(`Opened ${result.document.source?.displayName ?? result.document.title}.`);
     },
     [editor],
   );
@@ -566,16 +564,7 @@ export function App() {
     async (saveAs = false, closeWhenDone = false): Promise<boolean> => {
       if (!editor) return false;
       const current: EditorDocumentV1 = { ...documentRef.current, content: editor.getJSON() };
-      if (
-        !saveAs
-        && current.source
-        && current.compatibilityIssues.length
-        && !window.confirm(
-          'This document contains Word features TXT Docs cannot preserve. Continue and overwrite the original? Choosing Cancel lets you use Save As instead.',
-        )
-      ) {
-        return false;
-      }
+      const savedSelection = { from: editor.state.selection.from, to: editor.state.selection.to };
       setOperation('saving');
       setError(null);
       try {
@@ -617,10 +606,31 @@ export function App() {
         return false;
       } finally {
         setOperation('ready');
+        if (!closeWhenDone) {
+          window.requestAnimationFrame(() => {
+            const maximum = editor.state.doc.content.size;
+            editor.chain().focus().setTextSelection({
+              from: Math.max(1, Math.min(savedSelection.from, maximum)),
+              to: Math.max(1, Math.min(savedSelection.to, maximum)),
+            }).run();
+          });
+        }
       }
     },
     [editor],
   );
+
+  const reportCompatibility = useCallback(async () => {
+    try {
+      await window.documentsApi.reportCompatibility({
+        sourceFormat: documentRef.current.source?.format ?? 'unsaved',
+        issues: documentRef.current.compatibilityIssues,
+      });
+      setNotice('Compatibility report opened in GitHub. Review it, then submit.');
+    } catch (reportError) {
+      setError(safeError(reportError));
+    }
+  }, []);
 
   const printDocument = useCallback(async () => {
     if (!editor) return;
@@ -1048,7 +1058,7 @@ export function App() {
           <div className="titlebar-file-actions" aria-label="File actions">
             <ToolButton label="New document" icon={<FilePlus2 size={19} />} onClick={createNew} disabled={busy} />
             <ToolButton label="Open document" icon={<FolderOpen size={19} />} onClick={() => void openDocument()} disabled={busy} />
-            <ToolButton label="Save As" icon={<Save size={19} />} onClick={() => void saveDocument(true)} disabled={busy} />
+            <ToolButton label="Save" icon={<Save size={19} />} onClick={() => void saveDocument(false)} disabled={busy} />
             <ToolButton label="Print document" icon={<Printer size={19} />} onClick={() => void printDocument()} disabled={busy} />
           </div>
           <div className="document-identity">
@@ -1365,7 +1375,7 @@ export function App() {
                 <X size={16} />
               </button>
             </div>
-            <p>{issueSummary(document.compatibilityIssues)}</p>
+            <p>{issueSummary(document.compatibilityIssues)} Save updates the current file; Save As creates a separate file.</p>
             <ul>
               {document.compatibilityIssues.map((issue) => (
                 <li key={issue.code}>
@@ -1374,9 +1384,12 @@ export function App() {
                 </li>
               ))}
             </ul>
-            <button type="button" className="primary-button" onClick={() => void saveDocument(true)}>
-              Save a compatible copy
-            </button>
+            <div className="compatibility-report">
+              <button type="button" className="primary-button" onClick={() => void reportCompatibility()}>
+                <Bug size={14} aria-hidden="true" /> Report these issues
+              </button>
+              <small>Opens a prefilled GitHub issue with app and system details only—never the file name or contents.</small>
+            </div>
           </aside>
         )}
       </main>

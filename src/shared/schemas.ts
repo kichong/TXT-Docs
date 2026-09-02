@@ -30,6 +30,11 @@ const sourceSchema = z.object({
   legacyImported: z.boolean(),
 });
 
+export const compatibilityReportRequestSchema = z.object({
+  sourceFormat: z.enum(['docx', 'doc-import', 'txt', 'md', 'unsaved']),
+  issues: z.array(compatibilityIssueSchema).min(1).max(100),
+});
+
 const pageSettingsSchema = z.object({
   size: z.literal('letter'),
   orientation: z.literal('portrait'),

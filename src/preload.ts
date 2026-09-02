@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppCommand,
   AppUpdateState,
+  CompatibilityReportRequest,
   DesktopDocumentsApi,
   EditorDocumentV1,
   SaveRequest,
@@ -19,6 +20,7 @@ const api: DesktopDocumentsApi = {
   openRecent: (id: string) => ipcRenderer.invoke('documents:open-recent', id),
   saveDocument: (request: SaveRequest) => ipcRenderer.invoke('documents:save', request),
   saveDocumentAs: (request: SaveRequest) => ipcRenderer.invoke('documents:save-as', request),
+  reportCompatibility: (request: CompatibilityReportRequest) => ipcRenderer.invoke('documents:report-compatibility', request),
   printDocument: (request) => ipcRenderer.invoke('documents:print', request),
   pickImage: () => ipcRenderer.invoke('documents:pick-image'),
   readClipboardContent: () => ipcRenderer.invoke('clipboard:read-content'),

@@ -530,10 +530,10 @@ function detectCompatibility(zip: JSZip, documentXml: string, numberingXml?: str
   };
   const files = Object.keys(zip.files);
   if (files.some((name) => /vbaProject\.bin$/iu.test(name))) {
-    add('macros', 'Macros are not preserved', 'This document contains VBA macros. Save As is recommended.');
+    add('macros', 'Macros are not preserved', 'VBA macros will be removed if this file is saved from TXT Docs.');
   }
   if (files.some((name) => /word\/comments.*\.xml$/iu.test(name))) {
-    add('comments', 'Comments are not preserved', 'Review comments are outside the v1 editing model.');
+    add('comments', 'Comments are not preserved', 'Review comments will be removed if this file is saved from TXT Docs.');
   }
   if (files.some((name) => /word\/header\d*\.xml$/iu.test(name) || /word\/footer\d*\.xml$/iu.test(name))) {
     add('headers-footers', 'Headers or footers are not preserved', 'Advanced page furniture is deferred.');

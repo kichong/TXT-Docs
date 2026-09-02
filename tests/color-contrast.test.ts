@@ -11,7 +11,7 @@ describe('editor color contrast', () => {
     for (const color of colors) {
       const previews = accessibleTextPreviews(color);
       expect(contrastRatio(previews.light, '#fffefb')).toBeGreaterThanOrEqual(4.5);
-      expect(contrastRatio(previews.dark, '#24272c')).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(previews.dark, '#24272c')).toBeGreaterThanOrEqual(7);
     }
   });
 

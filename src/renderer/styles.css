@@ -96,7 +96,7 @@ select:focus-visible,
   --danger: #ff8e98;
   --danger-soft: #4a242a;
   --paper: #24272c;
-  --paper-text: #f2f3f5;
+  --paper-text: #f8f9fb;
   --paper-heading: #ffffff;
   --paper-border: #555a64;
   --paper-table-header: #30343b;
@@ -1590,8 +1590,28 @@ select:focus-visible,
   line-height: 1.4;
 }
 
-.compatibility-panel > .primary-button {
+.compatibility-report .primary-button {
   width: 100%;
+}
+
+.compatibility-report {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 4px;
+}
+
+.compatibility-report .primary-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.compatibility-report small {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .statusbar {

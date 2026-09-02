@@ -81,6 +81,11 @@ export interface PrintRequest {
   page: PageSettings;
 }
 
+export interface CompatibilityReportRequest {
+  sourceFormat: DocumentFormat | 'unsaved';
+  issues: CompatibilityIssue[];
+}
+
 export interface PrintResult {
   status: 'printed' | 'cancelled' | 'failed';
   error?: string;
@@ -146,6 +151,7 @@ export interface DesktopDocumentsApi {
   openRecent(id: string): Promise<OpenResult | null>;
   saveDocument(request: SaveRequest): Promise<SaveResult>;
   saveDocumentAs(request: SaveRequest): Promise<SaveResult>;
+  reportCompatibility(request: CompatibilityReportRequest): Promise<void>;
   printDocument(request: PrintRequest): Promise<PrintResult>;
   pickImage(): Promise<ImageAsset | null>;
   readClipboardContent(): Promise<ClipboardContent>;
