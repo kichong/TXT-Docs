@@ -30,6 +30,13 @@ const sourceSchema = z.object({
   legacyImported: z.boolean(),
 });
 
+const documentCommentSchema = z.object({
+  id: z.string().min(1).max(200),
+  body: z.string().max(100_000),
+  author: z.string().max(500).optional(),
+  createdAt: z.string().datetime().optional(),
+});
+
 export const compatibilityReportRequestSchema = z.object({
   sourceFormat: z.enum(['docx', 'doc-import', 'txt', 'md', 'unsaved']),
   issues: z.array(compatibilityIssueSchema).min(1).max(100),
@@ -55,6 +62,7 @@ export const editorDocumentSchema = z.object({
   page: pageSettingsSchema,
   source: sourceSchema.optional(),
   compatibilityIssues: z.array(compatibilityIssueSchema).max(100),
+  comments: z.array(documentCommentSchema).max(10_000).default([]),
 });
 
 export const saveRequestSchema = z.object({

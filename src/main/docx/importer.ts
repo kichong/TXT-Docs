@@ -3,6 +3,7 @@ import { XMLParser } from 'fast-xml-parser';
 import {
   DEFAULT_PAGE_SETTINGS,
   type CompatibilityIssue,
+  type DocumentComment,
   type DocumentSource,
   type EditorDocumentV1,
   type JSONContent,
@@ -131,6 +132,40 @@ interface ImportContext {
   relationships: Map<string, string>;
   numbering: Map<string, Map<number, 'bullet' | 'ordered' | 'unsupported'>>;
   media: Map<string, string>;
+  comments: Map<string, DocumentComment>;
+  activeCommentIds: string[];
+}
+
+function parseComments(xml?: string): Map<string, DocumentComment> {
+  const comments = new Map<string, DocumentComment>();
+  if (!xml) return comments;
+  const data = parser.parse(xml);
+  for (const item of asArray(data?.comments?.comment)) {
+    const id = attr(item, 'id');
+    if (!id) continue;
+    const collectText = (value: unknown): string => {
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'string' || typeof value === 'number') return String(value);
+      if (Array.isArray(value)) return value.map(collectText).join('');
+      if (typeof value === 'object') {
+        const node = value as Record<string, unknown>;
+        if (node['#text'] !== undefined) return collectText(node['#text']);
+        if (node.t !== undefined) return collectText(node.t);
+        if (node.tab !== undefined) return '\t';
+        if (node.br !== undefined) return '\n';
+        return [node.p, node.r, node.hyperlink, node.sdt, node.sdtContent].map(collectText).join('');
+      }
+      return '';
+    };
+    const date = attr(item, 'date');
+    comments.set(id, {
+      id,
+      body: collectText(item.p).trim(),
+      author: attr(item, 'author') || undefined,
+      createdAt: date && !Number.isNaN(Date.parse(date)) ? new Date(date).toISOString() : undefined,
+    });
+  }
+  return comments;
 }
 
 function parseStyles(xml?: string): StyleCatalog {
@@ -382,12 +417,35 @@ async function runsFromContainer(
   if (orderedChildren) {
     let runIndex = 0;
     let hyperlinkIndex = 0;
+    const activeComments = context.activeCommentIds;
     for (const child of orderedChildren) {
-      if (child.r !== undefined && runIndex < runs.length) {
+      if (child.commentRangeStart !== undefined) {
+        const id = attr(child[':@'], 'id');
+        if (id && context.comments.has(id) && !activeComments.includes(id)) activeComments.push(id);
+      } else if (child.commentRangeEnd !== undefined) {
+        const id = attr(child[':@'], 'id');
+        const index = id ? activeComments.lastIndexOf(id) : -1;
+        if (index >= 0) activeComments.splice(index, 1);
+      } else if (child.r !== undefined && runIndex < runs.length) {
+        const before = content.length;
         await appendRun(runs[runIndex]);
+        for (const node of content.slice(before)) {
+          if (node.type !== 'text' || !activeComments.length) continue;
+          node.marks = [...(node.marks ?? []), ...activeComments.map((commentId) => ({
+            type: 'commentAnchor',
+            attrs: { commentId },
+          }))];
+        }
         runIndex += 1;
       } else if (child.hyperlink !== undefined && hyperlinkIndex < hyperlinks.length) {
+        const before = content.length;
         await appendHyperlink(hyperlinks[hyperlinkIndex], asArray(child.hyperlink));
+        for (const node of content.slice(before)) {
+          if (node.type !== 'text' || !activeComments.length) continue;
+          node.marks = [...(node.marks ?? []), ...activeComments.map((commentId) => ({
+            type: 'commentAnchor', attrs: { commentId },
+          }))];
+        }
         hyperlinkIndex += 1;
       }
     }
@@ -504,14 +562,33 @@ function appendListParagraph(
   current.lastItem = item;
 }
 
-async function importTable(table: XmlNode, context: ImportContext): Promise<JSONContent> {
+function orderedParagraphs(xml: string): XmlNode[][] {
+  const output: XmlNode[][] = [];
+  const visit = (value: unknown): void => {
+    if (!Array.isArray(value)) return;
+    for (const child of value as XmlNode[]) {
+      if (child.p !== undefined) {
+        output.push(asArray(child.p));
+        continue;
+      }
+      for (const nested of Object.values(child)) visit(nested);
+    }
+  };
+  visit(orderedParser.parse(xml));
+  return output;
+}
+
+async function importTable(table: XmlNode, context: ImportContext, orderedXml?: string): Promise<JSONContent> {
   const rows: JSONContent[] = [];
+  const paragraphOrder = orderedXml ? orderedParagraphs(orderedXml) : [];
+  let paragraphIndex = 0;
   for (const row of asArray(table.tr)) {
     const cells: JSONContent[] = [];
     for (const cell of asArray(row.tc)) {
       const cellContent: JSONContent[] = [];
       for (const paragraph of asArray(cell.p)) {
-        cellContent.push((await importParagraph(paragraph, context)).node);
+        cellContent.push((await importParagraph(paragraph, context, paragraphOrder[paragraphIndex])).node);
+        paragraphIndex += 1;
       }
       if (!cellContent.length) cellContent.push({ type: 'paragraph' });
       cells.push({ type: 'tableCell', content: cellContent });
@@ -531,9 +608,6 @@ function detectCompatibility(zip: JSZip, documentXml: string, numberingXml?: str
   const files = Object.keys(zip.files);
   if (files.some((name) => /vbaProject\.bin$/iu.test(name))) {
     add('macros', 'Macros are not preserved', 'VBA macros will be removed if this file is saved from TXT Docs.');
-  }
-  if (files.some((name) => /word\/comments.*\.xml$/iu.test(name))) {
-    add('comments', 'Comments are not preserved', 'Review comments will be removed if this file is saved from TXT Docs.');
   }
   if (files.some((name) => /word\/header\d*\.xml$/iu.test(name) || /word\/footer\d*\.xml$/iu.test(name))) {
     add('headers-footers', 'Headers or footers are not preserved', 'Advanced page furniture is deferred.');
@@ -671,11 +745,12 @@ export async function importDocx(
   const documentFile = zip.file('word/document.xml');
   if (!documentFile) throw new Error('The DOCX package does not contain word/document.xml.');
   const documentXml = await documentFile.async('text');
-  const [stylesXml, relationshipsXml, numberingXml, themeXml] = await Promise.all([
+  const [stylesXml, relationshipsXml, numberingXml, themeXml, commentsXml] = await Promise.all([
     zip.file('word/styles.xml')?.async('text'),
     zip.file('word/_rels/document.xml.rels')?.async('text'),
     zip.file('word/numbering.xml')?.async('text'),
     zip.file('word/theme/theme1.xml')?.async('text'),
+    zip.file('word/comments.xml')?.async('text'),
   ]);
 
   const context: ImportContext = {
@@ -685,6 +760,8 @@ export async function importDocx(
     relationships: parseRelationships(relationshipsXml),
     numbering: parseNumbering(numberingXml),
     media: new Map(),
+    comments: parseComments(commentsXml),
+    activeCommentIds: [],
   };
   let content: JSONContent[] = [];
   const sectionSegments: Array<{ nodes: JSONContent[]; spec: SectionSpec }> = [];
@@ -704,7 +781,7 @@ export async function importDocx(
     const parsed = parser.parse(block.xml);
     if (block.type === 'tbl') {
       listStack.length = 0;
-      content.push(await importTable(parsed.tbl, context));
+      content.push(await importTable(parsed.tbl, context, block.xml));
       continue;
     }
     const ordered = orderedParser.parse(block.xml);
@@ -752,6 +829,7 @@ export async function importDocx(
     compatibilityIssues: unevenColumnsPreserved
       ? compatibilityIssues.filter((issue) => issue.code !== 'uneven-columns')
       : compatibilityIssues,
+    comments: [...context.comments.values()],
     content: { type: 'doc', content },
   };
 }

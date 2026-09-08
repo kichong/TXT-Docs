@@ -2,6 +2,9 @@ import {
   AlignmentType,
   BorderStyle,
   Column,
+  CommentRangeEnd,
+  CommentRangeStart,
+  CommentReference,
   Document,
   ExternalHyperlink,
   HeadingLevel,
@@ -82,13 +85,29 @@ function dataUrlToImage(src: string): { data: Uint8Array; type: 'png' | 'jpg' | 
   };
 }
 
-function paragraphChildren(node: JSONContent): Array<TextRun | ExternalHyperlink | ImageRun | PageBreak> {
-  const children: Array<TextRun | ExternalHyperlink | ImageRun | PageBreak> = [];
+type ExportInline = TextRun | ExternalHyperlink | ImageRun | PageBreak | CommentRangeStart | CommentRangeEnd | CommentReference;
+
+function paragraphChildren(node: JSONContent, commentIds: Map<string, number>): ExportInline[] {
+  const children: ExportInline[] = [];
   const tabIndentIn = Number(node.attrs?.tabIndentIn);
   if (Number.isFinite(tabIndentIn) && tabIndentIn > 0) {
     children.push(new TextRun({ text: '\t'.repeat(Math.max(1, Math.round(tabIndentIn / 0.5))) }));
   }
+  let activeComment: string | undefined;
   for (const child of node.content ?? []) {
+    const commentId = String(markOf(child, 'commentAnchor')?.attrs?.commentId ?? '');
+    if (activeComment && activeComment !== commentId) {
+      const numericId = commentIds.get(activeComment);
+      if (numericId !== undefined) children.push(new CommentRangeEnd(numericId), new CommentReference(numericId));
+      activeComment = undefined;
+    }
+    if (commentId && commentId !== activeComment) {
+      const numericId = commentIds.get(commentId);
+      if (numericId !== undefined) {
+        children.push(new CommentRangeStart(numericId));
+        activeComment = commentId;
+      }
+    }
     if (child.type === 'text') {
       const link = markOf(child, 'link');
       const run = new TextRun(textRunOptions(child));
@@ -120,11 +139,16 @@ function paragraphChildren(node: JSONContent): Array<TextRun | ExternalHyperlink
       );
     }
   }
+  if (activeComment) {
+    const numericId = commentIds.get(activeComment);
+    if (numericId !== undefined) children.push(new CommentRangeEnd(numericId), new CommentReference(numericId));
+  }
   return children.length ? children : [new TextRun('')];
 }
 
 function paragraphOptions(
   node: JSONContent,
+  commentIds: Map<string, number>,
   numbering?: { reference: string; level: number },
 ): IParagraphOptions {
   const attrs = node.attrs ?? {};
@@ -139,7 +163,7 @@ function paragraphOptions(
     || (Number.isFinite(spacingBeforePt) && spacingBeforePt >= 0)
     || (Number.isFinite(spacingAfterPt) && spacingAfterPt >= 0);
   return {
-    children: paragraphChildren(node),
+    children: paragraphChildren(node, commentIds),
     alignment: textAlign,
     keepNext: node.type === 'heading',
     heading:
@@ -166,11 +190,11 @@ function paragraphOptions(
   };
 }
 
-function exportParagraph(node: JSONContent, numbering?: { reference: string; level: number }): Paragraph {
-  return new Paragraph(paragraphOptions(node, numbering));
+function exportParagraph(node: JSONContent, commentIds: Map<string, number>, numbering?: { reference: string; level: number }): Paragraph {
+  return new Paragraph(paragraphOptions(node, commentIds, numbering));
 }
 
-function exportTable(node: JSONContent): Table {
+function exportTable(node: JSONContent, commentIds: Map<string, number>): Table {
   const rows = (node.content ?? []).map(
     (row) =>
       new TableRow({
@@ -181,7 +205,7 @@ function exportTable(node: JSONContent): Table {
               margins: { top: 100, right: 120, bottom: 100, left: 120 },
               children: (cell.content ?? []).map((child) =>
                 child.type === 'paragraph' || child.type === 'heading'
-                  ? exportParagraph(child)
+                  ? exportParagraph(child, commentIds)
                   : new Paragraph(''),
               ),
             }),
@@ -204,34 +228,34 @@ function exportTable(node: JSONContent): Table {
 
 type ExportedBlock = Paragraph | Table;
 
-function exportList(node: JSONContent, level = 0): ExportedBlock[] {
+function exportList(node: JSONContent, commentIds: Map<string, number>, level = 0): ExportedBlock[] {
   const output: ExportedBlock[] = [];
   const reference = node.type === 'bulletList' ? 'txt-docs-bullets' : 'txt-docs-numbering';
   for (const item of node.content ?? []) {
     let wroteParagraph = false;
     for (const child of item.content ?? []) {
       if (child.type === 'paragraph' || child.type === 'heading') {
-        output.push(exportParagraph(child, { reference, level }));
+        output.push(exportParagraph(child, commentIds, { reference, level }));
         wroteParagraph = true;
       } else if (child.type === 'bulletList' || child.type === 'orderedList') {
-        output.push(...exportList(child, Math.min(8, level + 1)));
+        output.push(...exportList(child, commentIds, Math.min(8, level + 1)));
       } else if (child.type === 'table') {
-        output.push(exportTable(child));
+        output.push(exportTable(child, commentIds));
       }
     }
-    if (!wroteParagraph) output.push(exportParagraph({ type: 'paragraph' }, { reference, level }));
+    if (!wroteParagraph) output.push(exportParagraph({ type: 'paragraph' }, commentIds, { reference, level }));
   }
   return output;
 }
 
-function exportNodes(nodes: JSONContent[]): ExportedBlock[] {
+function exportNodes(nodes: JSONContent[], commentIds: Map<string, number>): ExportedBlock[] {
   const blocks: ExportedBlock[] = [];
   for (const node of nodes) {
-    if (node.type === 'paragraph' || node.type === 'heading') blocks.push(exportParagraph(node));
-    else if (node.type === 'bulletList' || node.type === 'orderedList') blocks.push(...exportList(node));
-    else if (node.type === 'table') blocks.push(exportTable(node));
+    if (node.type === 'paragraph' || node.type === 'heading') blocks.push(exportParagraph(node, commentIds));
+    else if (node.type === 'bulletList' || node.type === 'orderedList') blocks.push(...exportList(node, commentIds));
+    else if (node.type === 'table') blocks.push(exportTable(node, commentIds));
     else if (node.type === 'image') {
-      blocks.push(exportParagraph({ type: 'paragraph', content: [node] }));
+      blocks.push(exportParagraph({ type: 'paragraph', content: [node] }, commentIds));
     } else if (node.type === 'pageBreak') {
       blocks.push(new Paragraph({ children: [new PageBreak()] }));
     } else if (node.type === 'horizontalRule') {
@@ -245,8 +269,8 @@ function exportNodes(nodes: JSONContent[]): ExportedBlock[] {
   return blocks.length ? blocks : [new Paragraph('')];
 }
 
-function exportBlocks(document: EditorDocumentV1): ExportedBlock[] {
-  return exportNodes(document.content.content ?? []);
+function exportBlocks(document: EditorDocumentV1, commentIds: Map<string, number>): ExportedBlock[] {
+  return exportNodes(document.content.content ?? [], commentIds);
 }
 
 function sectionChildren(node: JSONContent): JSONContent[] {
@@ -276,6 +300,7 @@ function numberingLevels(kind: 'bullet' | 'ordered') {
 }
 
 export async function exportDocx(document: EditorDocumentV1): Promise<Buffer> {
+  const commentIds = new Map((document.comments ?? []).map((comment, index) => [comment.id, index]));
   const pageProperties = {
     size: { width: 12240, height: 15840 },
     margin: {
@@ -309,7 +334,7 @@ export async function exportDocx(document: EditorDocumentV1): Promise<Buffer> {
             },
             page: pageProperties,
           },
-          children: exportNodes(sectionChildren(node)),
+          children: exportNodes(sectionChildren(node), commentIds),
         };
       })
     : [
@@ -322,13 +347,22 @@ export async function exportDocx(document: EditorDocumentV1): Promise<Buffer> {
             },
             page: pageProperties,
           },
-          children: exportBlocks(document),
+          children: exportBlocks(document, commentIds),
         },
       ];
   const docx = new Document({
     creator: 'TXT Docs',
     title: document.title,
     description: 'Created with TXT Docs',
+    comments: {
+      children: (document.comments ?? []).map((comment, index) => ({
+        id: index,
+        author: comment.author || 'TXT Docs User',
+        initials: '',
+        date: comment.createdAt ? new Date(comment.createdAt) : new Date(),
+        children: [new Paragraph({ children: [new TextRun(comment.body)] })],
+      })),
+    },
     styles: {
       default: {
         document: {

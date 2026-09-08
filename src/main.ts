@@ -143,6 +143,7 @@ async function openPath(path: string): Promise<OpenResult> {
         page: DEFAULT_PAGE_SETTINGS,
         source,
         compatibilityIssues: [],
+        comments: [],
       },
       recentFiles,
     };
@@ -357,7 +358,7 @@ function installIpcHandlers(): void {
       ...parsed,
       appName: 'TXT Docs',
       appVersion: app.getVersion(),
-      operatingSystem: `${process.platform} ${process.getSystemVersion()}`,
+      operatingSystem: process.platform,
       repositoryUrl: 'https://github.com/kichong/TXT-Docs',
     }));
   });

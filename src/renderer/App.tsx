@@ -37,6 +37,7 @@ import {
   List,
   ListOrdered,
   Moon,
+  MessageSquarePlus,
   PanelLeftClose,
   PanelLeftOpen,
   Pilcrow,
@@ -374,6 +375,8 @@ export function App() {
   const [outlineWidth, setOutlineWidth] = useState(224);
   const resizingOutline = useRef(false);
   const [compatibilityOpen, setCompatibilityOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   const [zoom, setZoom] = useState(1);
   const [, setSelectionRevision] = useState(0);
@@ -431,7 +434,14 @@ export function App() {
 
   useEffect(() => {
     if (!editor) return;
-    const refreshSelectionState = () => setSelectionRevision((value) => value + 1);
+    const refreshSelectionState = () => {
+      setSelectionRevision((value) => value + 1);
+      const id = editor.getAttributes('commentAnchor').commentId;
+      if (typeof id === 'string' && id) {
+        setActiveCommentId(id);
+        setCommentsOpen(true);
+      }
+    };
     editor.on('selectionUpdate', refreshSelectionState);
     return () => {
       editor.off('selectionUpdate', refreshSelectionState);
@@ -502,6 +512,8 @@ export function App() {
       setDirty(false);
       setError(null);
       setCompatibilityOpen(false);
+      setCommentsOpen(false);
+      setActiveCommentId(null);
       setNotice(`Opened ${result.document.source?.displayName ?? result.document.title}.`);
     },
     [editor],
@@ -520,6 +532,8 @@ export function App() {
     setDirty(false);
     setError(null);
     setNotice('New document ready.');
+    setCommentsOpen(false);
+    setActiveCommentId(null);
     void window.documentsApi.clearRecovery();
   }, [confirmAbandon, editor]);
 
@@ -631,6 +645,56 @@ export function App() {
       setError(safeError(reportError));
     }
   }, []);
+
+  const addComment = useCallback(() => {
+    if (!editor || editor.state.selection.empty) {
+      setNotice('Select the text you want to comment on first.');
+      return;
+    }
+    const id = globalThis.crypto.randomUUID();
+    const comment = { id, body: '', author: 'TXT Docs User', createdAt: new Date().toISOString() };
+    editor.chain().focus().setMark('commentAnchor', { commentId: id }).run();
+    setDocument((current) => ({ ...current, comments: [...(current.comments ?? []), comment] }));
+    setDirty(true);
+    setActiveCommentId(id);
+    setCommentsOpen(true);
+  }, [editor]);
+
+  const updateComment = useCallback((id: string, body: string) => {
+    setDocument((current) => ({
+      ...current,
+      comments: (current.comments ?? []).map((comment) => comment.id === id ? { ...comment, body } : comment),
+    }));
+    setDirty(true);
+  }, []);
+
+  const selectComment = useCallback((id: string) => {
+    if (!editor) return;
+    let range: { from: number; to: number } | undefined;
+    editor.state.doc.descendants((node, position) => {
+      if (!node.isText || !node.marks.some((mark) => mark.type.name === 'commentAnchor' && mark.attrs.commentId === id)) return;
+      const from = position;
+      const to = position + node.nodeSize;
+      range = range ? { from: Math.min(range.from, from), to: Math.max(range.to, to) } : { from, to };
+    });
+    if (range) editor.chain().focus().setTextSelection(range).scrollIntoView().run();
+    setActiveCommentId(id);
+  }, [editor]);
+
+  const deleteComment = useCallback((id: string) => {
+    if (!editor) return;
+    const mark = editor.schema.marks.commentAnchor.create({ commentId: id });
+    const transaction = editor.state.tr;
+    editor.state.doc.descendants((node, position) => {
+      if (node.isText && node.marks.some((candidate) => candidate.eq(mark))) {
+        transaction.removeMark(position, position + node.nodeSize, mark);
+      }
+    });
+    editor.view.dispatch(transaction);
+    setDocument((current) => ({ ...current, comments: (current.comments ?? []).filter((comment) => comment.id !== id) }));
+    setDirty(true);
+    setActiveCommentId(null);
+  }, [editor]);
 
   const printDocument = useCallback(async () => {
     if (!editor) return;
@@ -1075,11 +1139,20 @@ export function App() {
             </span>
           </div>
           <div className="titlebar-actions">
+            <button
+              type="button"
+              className="comments-button"
+              onClick={() => { setCommentsOpen((open) => !open); setCompatibilityOpen(false); }}
+              aria-expanded={commentsOpen}
+            >
+              <MessageSquarePlus size={15} aria-hidden="true" />
+              {(document.comments ?? []).length ? `${document.comments.length} ${document.comments.length === 1 ? 'comment' : 'comments'}` : 'Comments'}
+            </button>
             {document.compatibilityIssues.length > 0 && (
               <button
                 type="button"
                 className="compatibility-button"
-                onClick={() => setCompatibilityOpen((open) => !open)}
+                onClick={() => { setCompatibilityOpen((open) => !open); setCommentsOpen(false); }}
               >
                 {document.compatibilityIssues.length} compatibility
               </button>
@@ -1369,13 +1442,13 @@ export function App() {
             <div className="compatibility-header">
               <div>
                 <strong>Compatibility</strong>
-                <span>Original Word features</span>
+                <span>Features detected when this file was opened</span>
               </div>
               <button type="button" aria-label="Close compatibility notices" onClick={() => setCompatibilityOpen(false)}>
                 <X size={16} />
               </button>
             </div>
-            <p>{issueSummary(document.compatibilityIssues)} Save updates the current file; Save As creates a separate file.</p>
+            <p>{issueSummary(document.compatibilityIssues)} Saving may change the features below. Use Save As to keep the original file unchanged.</p>
             <ul>
               {document.compatibilityIssues.map((issue) => (
                 <li key={issue.code}>
@@ -1386,10 +1459,41 @@ export function App() {
             </ul>
             <div className="compatibility-report">
               <button type="button" className="primary-button" onClick={() => void reportCompatibility()}>
-                <Bug size={14} aria-hidden="true" /> Report these issues
+                <Bug size={14} aria-hidden="true" /> Review report on GitHub
               </button>
-              <small>Opens a prefilled GitHub issue with app and system details only—never the file name or contents.</small>
+              <small>Opens a draft GitHub issue containing compatibility categories only. Review it before submitting. Filenames, paths, document text, comments, authors, and metadata stay private.</small>
             </div>
+          </aside>
+        )}
+        {commentsOpen && (
+          <aside className="comments-panel" aria-label="Document comments">
+            <div className="compatibility-header">
+              <div><strong>Comments</strong><span>Review notes saved in this document</span></div>
+              <button type="button" aria-label="Close comments" onClick={() => setCommentsOpen(false)}><X size={16} /></button>
+            </div>
+            <button type="button" className="primary-button comments-add" onClick={addComment} disabled={editor.state.selection.empty || plainTextMode}>
+              <MessageSquarePlus size={14} aria-hidden="true" /> Add comment to selection
+            </button>
+            {plainTextMode && <p>Comments are available in DOCX documents.</p>}
+            {(document.comments ?? []).length ? (
+              <ul className="comments-list">
+                {document.comments.map((comment) => (
+                  <li key={comment.id} className={activeCommentId === comment.id ? 'is-active' : ''}>
+                    <button type="button" className="comment-location" onClick={() => selectComment(comment.id)}>
+                      {comment.author || 'Comment'}{comment.createdAt ? ` · ${new Date(comment.createdAt).toLocaleDateString()}` : ''}
+                    </button>
+                    <textarea
+                      aria-label="Comment text"
+                      value={comment.body}
+                      placeholder="Write a comment…"
+                      onFocus={() => setActiveCommentId(comment.id)}
+                      onChange={(event) => updateComment(comment.id, event.target.value)}
+                    />
+                    <button type="button" className="text-button comment-delete" onClick={() => deleteComment(comment.id)}>Delete comment</button>
+                  </li>
+                ))}
+              </ul>
+            ) : <p>Select text, then add a comment.</p>}
           </aside>
         )}
       </main>

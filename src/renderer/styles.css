@@ -1520,6 +1520,13 @@ select:focus-visible,
   letter-spacing: 0.08em;
 }
 
+.document-editor .comment-anchor {
+  padding-block: 1px;
+  background: color-mix(in srgb, #f9ab00 24%, transparent);
+  border-bottom: 2px solid #e69b00;
+  cursor: pointer;
+}
+
 .compatibility-panel {
   position: absolute;
   top: 12px;
@@ -1613,6 +1620,23 @@ select:focus-visible,
   font-size: 10px;
   line-height: 1.45;
 }
+
+.comments-panel {
+  position: absolute; top: 12px; right: 12px; z-index: 11; width: 340px;
+  max-height: calc(100% - 24px); padding: 14px; overflow: auto;
+  border: 1px solid var(--border); border-radius: 10px; color: var(--text);
+  background: var(--chrome-elevated); box-shadow: 0 18px 50px rgb(0 0 0 / 23%);
+}
+.comments-button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: transparent; font: inherit; cursor: pointer; }
+.comments-button:hover, .comments-button[aria-expanded="true"] { background: var(--chrome-muted); }
+.comments-add { display: flex; width: 100%; align-items: center; justify-content: center; gap: 7px; margin: 14px 0 8px; }
+.comments-panel > p { color: var(--text-muted); font-size: 12px; }
+.comments-list { display: flex; flex-direction: column; gap: 8px; padding: 0; list-style: none; }
+.comments-list li { display: flex; flex-direction: column; gap: 7px; padding: 10px; border: 1px solid var(--border); border-radius: 7px; }
+.comments-list li.is-active { border-color: #e69b00; }
+.comment-location { padding: 0; border: 0; color: var(--text-muted); background: transparent; text-align: left; font-size: 10px; cursor: pointer; }
+.comments-list textarea { min-height: 76px; resize: vertical; padding: 8px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); background: var(--chrome); font: inherit; line-height: 1.4; }
+.comment-delete { align-self: flex-end; color: #c5221f; }
 
 .statusbar {
   position: relative;
@@ -1779,6 +1803,7 @@ select:focus-visible,
   .outline-panel,
   .outline-open-button,
   .compatibility-panel,
+  .comments-panel,
   .statusbar {
     display: none !important;
   }

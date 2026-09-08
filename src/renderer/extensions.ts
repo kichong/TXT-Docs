@@ -1,4 +1,4 @@
-import { Extension, Node, getStyleProperty, mergeAttributes } from '@tiptap/core';
+import { Extension, Mark, Node, getStyleProperty, mergeAttributes } from '@tiptap/core';
 import { Color } from '@tiptap/extension-color';
 import { FontFamily } from '@tiptap/extension-font-family';
 import { Highlight } from '@tiptap/extension-highlight';
@@ -220,6 +220,28 @@ export const ResizableImage = Image.extend({
   },
 });
 
+export const CommentAnchor = Mark.create({
+  name: 'commentAnchor',
+  inclusive: false,
+  addAttributes() {
+    return {
+      commentId: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('data-comment-id'),
+        renderHTML: (attributes) => attributes.commentId
+          ? { 'data-comment-id': attributes.commentId }
+          : {},
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: 'span[data-comment-id]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['span', mergeAttributes(HTMLAttributes, { class: 'comment-anchor' }), 0];
+  },
+});
+
 export const editorExtensions = [
   StarterKit.configure({
     heading: { levels: [1, 2, 3] },
@@ -232,6 +254,7 @@ export const editorExtensions = [
   LineHeight.configure({ types: ['heading', 'paragraph'] }),
   AccessibleColor,
   AccessibleHighlight.configure({ multicolor: true }),
+  CommentAnchor,
   Underline,
   Subscript,
   Superscript,

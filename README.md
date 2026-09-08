@@ -10,7 +10,7 @@ TXT Docs is a local-first Windows word processor for everyday DOCX, Markdown, an
 - Find text with `Ctrl+F`, match counts, next/previous navigation, and highlighted results
 - Paste with source formatting (default), merged formatting, or text only
 - Fonts, sizes, title and heading styles, basic color palettes, highlights, inline formatting, alignment, spacing, lists, and indentation
-- Links, images, simple resizable tables, page breaks, and Word-compatible multi-section layouts with equal or unequal columns
+- Links, images, simple resizable tables, page breaks, editable review comments, and Word-compatible multi-section layouts with equal or unequal columns
 - Native printing and clean, cursor-free Letter-size PDF output
 - Resizable document outline and compact four-action file toolbar
 - Recent documents and local crash recovery
@@ -22,7 +22,7 @@ TXT Docs is a local-first Windows word processor for everyday DOCX, Markdown, an
 
 Markdown and plain-text files use a deliberately unformatted editing mode so their source text stays literal and portable. Saving a rich document as `.txt` or `.md` flattens it to plain text.
 
-Advanced Word structures such as comments, tracked changes, macros, content controls, equations, complex headers/footers, and floating objects are detected but are not losslessly round-tripped in v1. TXT Docs recommends **Save As** when those features are present.
+Advanced Word structures such as tracked changes, macros, content controls, equations, complex headers/footers, and floating objects are detected but are not losslessly round-tripped in v1. TXT Docs recommends **Save As** when those features are present. Review comments can be viewed, added, edited, deleted, and saved back to DOCX.
 
 ## Development
 

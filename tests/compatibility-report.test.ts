@@ -12,14 +12,15 @@ describe('compatibility report', () => {
       issues: [{
         code: 'comments',
         severity: 'warning',
-        title: 'Comments are not preserved',
-        detail: 'Review comments will be removed on save.',
+        title: 'PRIVATE filename and document text',
+        detail: 'PRIVATE comment body and author',
       }],
     }));
 
     expect(report.origin + report.pathname).toBe('https://github.com/kichong/TXT-Docs/issues/new');
-    expect(report.searchParams.get('title')).toContain('Comments are not preserved');
-    expect(report.searchParams.get('body')).toContain('No filename or document contents are included.');
-    expect(report.searchParams.get('body')).toContain('win32 10.0.26100');
+    expect(report.searchParams.get('title')).not.toContain('PRIVATE');
+    expect(report.searchParams.get('body')).not.toContain('PRIVATE');
+    expect(report.searchParams.get('body')).toContain('does not include the filename');
+    expect(report.searchParams.get('body')).toContain('Platform: other');
   });
 });

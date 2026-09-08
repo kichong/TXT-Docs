@@ -34,6 +34,13 @@ export interface CompatibilityIssue {
   detail: string;
 }
 
+export interface DocumentComment {
+  id: string;
+  body: string;
+  author?: string;
+  createdAt?: string;
+}
+
 export interface DocumentSource {
   id: string;
   displayName: string;
@@ -49,6 +56,7 @@ export interface EditorDocumentV1 {
   page: PageSettings;
   source?: DocumentSource;
   compatibilityIssues: CompatibilityIssue[];
+  comments: DocumentComment[];
 }
 
 export interface RecentFile {
@@ -189,6 +197,7 @@ export function createBlankDocument(title = 'Untitled document'): EditorDocument
     title,
     page: DEFAULT_PAGE_SETTINGS,
     compatibilityIssues: [],
+    comments: [],
     content: {
       type: 'doc',
       content: [{ type: 'paragraph' }],

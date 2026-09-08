@@ -253,7 +253,30 @@ describe('DOCX adapter', () => {
     zip.file('word/vbaProject.bin', new Uint8Array([1, 2, 3]));
     const imported = await importDocx(await zip.generateAsync({ type: 'uint8array' }), source);
     const codes = imported.compatibilityIssues.map((issue) => issue.code);
-    expect(codes).toContain('comments');
+    expect(codes).not.toContain('comments');
     expect(codes).toContain('macros');
+  });
+
+  it('round-trips editable Word comments and their text anchors', async () => {
+    const document = createBlankDocument('Comments');
+    document.comments = [{ id: 'review-1', body: 'Clarify this sentence.', author: 'Reviewer', createdAt: '2026-09-08T12:00:00.000Z' }];
+    document.content = {
+      type: 'doc',
+      content: [{
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Please ' },
+          { type: 'text', text: 'review this', marks: [{ type: 'commentAnchor', attrs: { commentId: 'review-1' } }] },
+          { type: 'text', text: ' today.' },
+        ],
+      }],
+    };
+
+    const imported = await importDocx(await exportDocx(document), source);
+    expect(imported.comments).toHaveLength(1);
+    expect(imported.comments[0]).toMatchObject({ body: 'Clarify this sentence.', author: 'Reviewer' });
+    const anchored = descendants(imported.content).find((node) => node.text === 'review this');
+    expect(anchored?.marks?.find((mark) => mark.type === 'commentAnchor')?.attrs?.commentId).toBe('0');
+    expect(imported.compatibilityIssues.map((issue) => issue.code)).not.toContain('comments');
   });
 });
