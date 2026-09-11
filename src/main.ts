@@ -406,15 +406,27 @@ function installIpcHandlers(): void {
   ipcMain.handle('updates:get-state', () => updateManager.getState());
   ipcMain.handle('updates:check', () => updateManager.checkForUpdates());
   ipcMain.handle('updates:download', () => updateManager.downloadUpdate());
-  ipcMain.handle('updates:install', () => {
+  ipcMain.handle('updates:install', async (_event, sourceId: unknown) => {
+    if (sourceId !== null && typeof sourceId !== 'string') throw new Error('Invalid document identifier.');
     if (dirty) throw new Error('Save your document before restarting to install the update.');
-    forceClose = true;
-    updateManager.installUpdate();
+    const state = updateManager.getState();
+    if (state.phase !== 'downloaded' || !state.availableVersion) throw new Error('No downloaded update is ready to install.');
+    await storage.prepareUpdateResume(sourceId, state.availableVersion);
+    try {
+      if (dirty) throw new Error('Save your document before restarting to install the update.');
+      forceClose = true;
+      updateManager.installUpdate();
+    } catch (error) {
+      forceClose = false;
+      await storage.clearUpdateResume();
+      throw error;
+    }
   });
   ipcMain.on('documents:set-dirty', (_event, value: unknown) => {
     dirty = value === true;
   });
   ipcMain.on('documents:close-after-save', () => {
+    if (dirty) return;
     forceClose = true;
     mainWindow?.close();
   });
@@ -458,7 +470,7 @@ function createWindow(): void {
       title: 'Unsaved changes',
       message: 'Save changes before closing?',
       detail: 'Your recovery copy remains local until the document is saved or discarded.',
-      buttons: ['Save', 'Discard', 'Cancel'],
+      buttons: ['Save', 'Close without saving', 'Cancel'],
       defaultId: 0,
       cancelId: 2,
       noLink: true,
@@ -494,7 +506,13 @@ app.whenReady().then(async () => {
   app.setAppUserModelId('com.txtdocs.app');
   storage = new LocalDocumentStorage(join(app.getPath('userData'), 'local-data'));
   await storage.initialize();
+  const resumePath = await storage.consumeUpdateResume(app.getVersion());
+  if (resumePath && pendingExternalPaths.length === 0) pendingExternalPaths.push(resumePath);
   updateManager = new AppUpdateManager(app.getVersion(), app.isPackaged, (state) => {
+    if (state.phase === 'error') {
+      forceClose = false;
+      void storage.clearUpdateResume().catch(() => undefined);
+    }
     mainWindow?.webContents.send('app:update-state', state);
   });
   updateManager.initialize();

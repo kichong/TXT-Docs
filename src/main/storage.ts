@@ -79,6 +79,38 @@ export class LocalDocumentStorage {
     return this.sources.get(id);
   }
 
+  async prepareUpdateResume(sourceId: string | null, version: string): Promise<void> {
+    const path = sourceId === null ? null : this.resolveSource(sourceId);
+    if (path === undefined) throw new Error('The current document is no longer available.');
+    await this.atomicWrite(
+      join(this.appDataPath, 'update-resume.json'),
+      Buffer.from(JSON.stringify({ path, version }), 'utf8'),
+    );
+  }
+
+  async clearUpdateResume(): Promise<void> {
+    await unlink(join(this.appDataPath, 'update-resume.json')).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+  }
+
+  async consumeUpdateResume(version: string): Promise<string | null> {
+    let resume: { path?: unknown; version?: unknown } | null = null;
+    try {
+      resume = JSON.parse(await readFile(join(this.appDataPath, 'update-resume.json'), 'utf8'));
+    } catch {
+      // Missing or malformed restore state should leave the normal blank start intact.
+    }
+    await this.clearUpdateResume();
+    if (resume?.version !== version || typeof resume.path !== 'string') return null;
+    try {
+      await access(resume.path, constants.R_OK);
+      return resume.path;
+    } catch {
+      return null;
+    }
+  }
+
   async getRecentFiles(): Promise<RecentFile[]> {
     const state = await this.readState();
     for (const item of state.recentFiles) this.sources.set(item.id, item.path);

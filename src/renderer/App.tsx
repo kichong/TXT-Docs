@@ -1032,11 +1032,12 @@ export function App() {
       if (action === 'check') setUpdateState(await window.documentsApi.checkForUpdates());
       if (action === 'download') setUpdateState(await window.documentsApi.downloadUpdate());
       if (action === 'install') {
+        if (busy) return;
         if (dirty) {
           setNotice('Save your document before restarting to install the update.');
           return;
         }
-        await window.documentsApi.installUpdate();
+        await window.documentsApi.installUpdate(documentRef.current.source?.id ?? null);
       }
     } catch (updateError) {
       setError(safeError(updateError));

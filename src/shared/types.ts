@@ -171,7 +171,7 @@ export interface DesktopDocumentsApi {
   getUpdateState(): Promise<AppUpdateState>;
   checkForUpdates(): Promise<AppUpdateState>;
   downloadUpdate(): Promise<AppUpdateState>;
-  installUpdate(): Promise<void>;
+  installUpdate(sourceId: string | null): Promise<void>;
   setDirty(dirty: boolean): void;
   requestCloseAfterSave(): void;
   onCommand(callback: (command: AppCommand) => void): () => void;

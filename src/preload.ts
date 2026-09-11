@@ -32,7 +32,7 @@ const api: DesktopDocumentsApi = {
   getUpdateState: async () => parseUpdateState(await ipcRenderer.invoke('updates:get-state')),
   checkForUpdates: async () => parseUpdateState(await ipcRenderer.invoke('updates:check')),
   downloadUpdate: async () => parseUpdateState(await ipcRenderer.invoke('updates:download')),
-  installUpdate: () => ipcRenderer.invoke('updates:install'),
+  installUpdate: (sourceId) => ipcRenderer.invoke('updates:install', sourceId),
   setDirty: (dirty: boolean) => ipcRenderer.send('documents:set-dirty', dirty),
   requestCloseAfterSave: () => ipcRenderer.send('documents:close-after-save'),
   onCommand: (callback: (command: AppCommand) => void) => {

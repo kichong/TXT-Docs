@@ -12,6 +12,58 @@ afterEach(async () => {
 });
 
 describe('local document storage', () => {
+  it('reopens only the selected update document, once, across an app restart', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'txt-docs-update-'));
+    cleanup.push(directory);
+    const storage = new LocalDocumentStorage(directory);
+    await storage.initialize();
+    const selectedPath = join(directory, 'selected.txt');
+    const recentPath = join(directory, 'recent.txt');
+    await storage.atomicWrite(selectedPath, Buffer.from('selected'));
+    await storage.atomicWrite(recentPath, Buffer.from('recent'));
+    const source = await storage.createSource(selectedPath);
+    await storage.remember(recentPath);
+    await storage.prepareUpdateResume(source.id, '0.3.8');
+
+    const restarted = new LocalDocumentStorage(directory);
+    expect(await restarted.consumeUpdateResume('0.3.8')).toBe(selectedPath);
+    expect(await restarted.consumeUpdateResume('0.3.8')).toBeNull();
+  });
+
+  it('starts blank after updating from a blank document or an unsuccessful update', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'txt-docs-update-blank-'));
+    cleanup.push(directory);
+    const storage = new LocalDocumentStorage(directory);
+    await storage.initialize();
+    const path = join(directory, 'previous.txt');
+    await storage.atomicWrite(path, Buffer.from('previous'));
+    const source = await storage.createSource(path);
+    await storage.prepareUpdateResume(source.id, '0.3.8');
+    await storage.prepareUpdateResume(null, '0.3.8');
+    expect(await storage.consumeUpdateResume('0.3.8')).toBeNull();
+
+    await storage.prepareUpdateResume(source.id, '0.3.8');
+    expect(await storage.consumeUpdateResume('0.3.7')).toBeNull();
+    expect(await storage.consumeUpdateResume('0.3.8')).toBeNull();
+
+    await storage.prepareUpdateResume(source.id, '0.3.8');
+    await storage.clearUpdateResume();
+    expect(await storage.consumeUpdateResume('0.3.8')).toBeNull();
+  });
+
+  it('handles missing files and malformed restore state without retrying on later launches', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'txt-docs-update-missing-'));
+    cleanup.push(directory);
+    const storage = new LocalDocumentStorage(directory);
+    await storage.initialize();
+    const source = await storage.createSource(join(directory, 'missing.txt'));
+    await storage.prepareUpdateResume(source.id, '0.3.8');
+    expect(await storage.consumeUpdateResume('0.3.8')).toBeNull();
+    await storage.atomicWrite(join(directory, 'update-resume.json'), Buffer.from('{invalid'));
+    expect(await storage.consumeUpdateResume('0.3.8')).toBeNull();
+    await expect(storage.prepareUpdateResume('unknown-source', '0.3.8')).rejects.toThrow();
+  });
+
   it('writes files atomically and persists recovery drafts', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'txt-docs-test-'));
     cleanup.push(directory);
