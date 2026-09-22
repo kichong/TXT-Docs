@@ -365,6 +365,10 @@ export async function exportDocx(document: EditorDocumentV1): Promise<Buffer> {
     },
     styles: {
       default: {
+        heading1: { run: { font: 'Cambria', size: 48, color: '202124', bold: true } },
+        heading2: { run: { font: 'Cambria', size: 36, color: '202124', bold: true } },
+        heading3: { run: { font: 'Cambria', size: 28, color: '202124', bold: true } },
+        title: { run: { font: 'Cambria', size: 56, color: '202124' } },
         document: {
           run: { font: 'Aptos', size: 22, color: '202124' },
           paragraph: { spacing: { after: 160, line: 276 } },

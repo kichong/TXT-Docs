@@ -308,7 +308,7 @@ function runMarks(rPr: XmlNode | undefined, themeFonts: ThemeFonts): JSONMark[] 
   const themeFont = attr(rPr.rFonts, 'asciiTheme') ?? attr(rPr.rFonts, 'hAnsiTheme');
   const font = attr(rPr.rFonts, 'ascii')
     ?? attr(rPr.rFonts, 'hAnsi')
-    ?? (themeFont?.toLowerCase().includes('major') ? themeFonts.major : themeFonts.minor);
+    ?? (themeFont ? (themeFont.toLowerCase().includes('major') ? themeFonts.major : themeFonts.minor) : undefined);
   const textStyle: Record<string, unknown> = {};
   if (color && color !== 'auto') textStyle.color = `#${color}`;
   if (Number.isFinite(size) && size > 0) textStyle.fontSize = `${size / 2}pt`;
@@ -376,7 +376,7 @@ async function runsFromContainer(
 
   const appendRun = async (run: XmlNode) => {
     const styleId = attr(run.rPr?.rStyle, 'val');
-    const styleRun = mergeProperties(context.styles, styleId, 'run');
+    const styleRun = styleId ? mergeStyleChain(context.styles, styleId, 'run') : {};
     const properties = { ...inheritedRun, ...styleRun, ...(run.rPr ?? {}) };
     const marks = runMarks(properties, context.themeFonts);
     if (linkHref) marks.push({ type: 'link', attrs: { href: linkHref } });

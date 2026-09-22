@@ -21,6 +21,23 @@ function nodeText(node: JSONContent): string {
 }
 
 describe('DOCX adapter', () => {
+  it('preserves paragraph spacing and default heading fonts across repeated saves', async () => {
+    let document = createBlankDocument('Formatting');
+    document.content = { type: 'doc', content: [
+      { type: 'heading', attrs: { level: 1, lineHeight: '1.5' }, content: [{ type: 'text', text: 'Heading' }] },
+      { type: 'paragraph', attrs: { lineHeight: '2' }, content: [{ type: 'text', text: 'Body' }] },
+    ] };
+    for (let pass = 0; pass < 2; pass += 1) {
+      const result = await importDocx(await exportDocx(document), source);
+      document = result;
+      const nodes = descendants(document.content);
+      expect(nodes.find((node) => node.type === 'heading')?.attrs?.lineHeight).toBe('1.5');
+      expect(nodes.find((node) => node.type === 'paragraph')?.attrs?.lineHeight).toBe('2');
+      const heading = nodes.find((node) => node.text === 'Heading');
+      expect(heading?.marks?.find((mark) => mark.type === 'textStyle')?.attrs?.fontFamily).toBe('Cambria');
+    }
+  });
+
   it('round-trips the supported semantic structure and formatting', async () => {
     const blank = createBlankDocument('Round trip');
     const document: EditorDocumentV1 = {

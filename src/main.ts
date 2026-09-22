@@ -450,6 +450,25 @@ function createWindow(): void {
     },
   });
 
+  const window = mainWindow;
+  window.webContents.on('context-menu', (_event, params) => {
+    if (!params.isEditable) return;
+    const items: MenuItemConstructorOptions[] = [];
+    if (params.misspelledWord) {
+      items.push(...params.dictionarySuggestions.map((word) => ({
+        label: word,
+        click: () => window.webContents.replaceMisspelling(word),
+      })));
+      if (!params.dictionarySuggestions.length) items.push({ label: 'No spelling suggestions', enabled: false });
+      items.push({ type: 'separator' });
+    }
+    items.push(
+      { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+      { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+    );
+    Menu.buildFromTemplate(items).popup({ window });
+  });
+
   const devServer = process.env.VITE_DEV_SERVER_URL;
   if (devServer) void mainWindow.loadURL(devServer);
   else void mainWindow.loadFile(join(__dirname, '../renderer/index.html'));

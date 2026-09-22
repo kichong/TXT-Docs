@@ -1,4 +1,4 @@
-import { Extension, Mark, Node, getStyleProperty, mergeAttributes } from '@tiptap/core';
+import { Extension, InputRule, Mark, Node, getStyleProperty, mergeAttributes, wrappingInputRule } from '@tiptap/core';
 import { Color } from '@tiptap/extension-color';
 import { FontFamily } from '@tiptap/extension-font-family';
 import { Highlight } from '@tiptap/extension-highlight';
@@ -14,6 +14,20 @@ import StarterKit from '@tiptap/starter-kit';
 import { DocumentSearch } from './search-extension';
 import { accessibleTextPreviews, highlightForeground } from './color-contrast';
 
+// LineHeight's upstream commands always target textStyle, even with node types.
+const ParagraphLineHeight = LineHeight.extend({
+  addCommands() {
+    return {
+      setLineHeight: (lineHeight) => ({ chain }) => chain()
+        .updateAttributes('paragraph', { lineHeight })
+        .updateAttributes('heading', { lineHeight }).run(),
+      unsetLineHeight: () => ({ chain }) => chain()
+        .resetAttributes('paragraph', 'lineHeight')
+        .resetAttributes('heading', 'lineHeight').run(),
+    };
+  },
+});
+
 const AccessibleColor = Color.extend({
   addGlobalAttributes() {
     return [
@@ -23,7 +37,7 @@ const AccessibleColor = Color.extend({
           color: {
             default: null,
             parseHTML: (element) => {
-              const value = getStyleProperty(element, 'color') ?? element.style.color;
+              const value = element.getAttribute('data-text-color') ?? getStyleProperty(element, 'color') ?? element.style.color;
               return value?.replace(/['"]+/gu, '');
             },
             renderHTML: (attributes) => {
@@ -242,6 +256,35 @@ export const CommentAnchor = Mark.create({
   },
 });
 
+export const AutomaticLists = Extension.create<{ isEnabled: () => boolean }>({
+  name: 'automaticLists',
+  addOptions() {
+    return { isEnabled: () => true };
+  },
+  addInputRules() {
+    const rules = [
+      wrappingInputRule({
+        find: /^\s*([-+*\u2022])\s$/,
+        type: this.editor.schema.nodes.bulletList,
+        keepMarks: true,
+        editor: this.editor,
+      }),
+      wrappingInputRule({
+        find: /^(\d{1,9})[.)]\s$/,
+        type: this.editor.schema.nodes.orderedList,
+        getAttributes: (match) => ({ start: Number(match[1]) }),
+        joinPredicate: (match, node) => Number(match[1]) === node.attrs.start + node.childCount,
+        keepMarks: true,
+        editor: this.editor,
+      }),
+    ];
+    return rules.map((rule) => new InputRule({
+      find: rule.find,
+      handler: (props) => this.options.isEnabled() ? rule.handler(props) : null,
+    }));
+  },
+});
+
 export const editorExtensions = [
   StarterKit.configure({
     heading: { levels: [1, 2, 3] },
@@ -251,7 +294,7 @@ export const editorExtensions = [
   TextStyle,
   FontFamily,
   FontSize,
-  LineHeight.configure({ types: ['heading', 'paragraph'] }),
+  ParagraphLineHeight.configure({ types: ['heading', 'paragraph'] }),
   AccessibleColor,
   AccessibleHighlight.configure({ multicolor: true }),
   CommentAnchor,

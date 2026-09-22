@@ -71,6 +71,8 @@ function accessibleColor(value: string, background: string, targetContrast = 4.5
 }
 
 export function accessibleTextPreviews(value: string): { light: string; dark: string } {
+  // Default DOCX ink must match unmarked text after reopening in dark mode.
+  if (value.toLowerCase() === DARK_TEXT) return { light: DARK_TEXT, dark: '#f8f9fb' };
   return {
     light: accessibleColor(value, LIGHT_PAPER),
     dark: accessibleColor(value, DARK_PAPER, 7),

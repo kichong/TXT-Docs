@@ -63,7 +63,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { editorExtensions } from './extensions';
+import { AutomaticLists, editorExtensions } from './extensions';
 import { updateDocumentSearch } from './search-extension';
 import { contentToPlainText, plainTextToContent } from '../shared/plain-text';
 import {
@@ -371,7 +371,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [recovery, setRecovery] = useState<RecoveryDraft | null>(null);
-  const [outlineOpen, setOutlineOpen] = useState(true);
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const [outlineWidth, setOutlineWidth] = useState(224);
   const resizingOutline = useRef(false);
   const [compatibilityOpen, setCompatibilityOpen] = useState(false);
@@ -402,10 +402,18 @@ export function App() {
     [document.content],
   );
 
+  useEffect(() => {
+    if (!notice?.startsWith('Saved ')) return;
+    const timeout = window.setTimeout(() => setNotice(null), 3000);
+    return () => window.clearTimeout(timeout);
+  }, [notice]);
+
   const editor = useEditor({
-    extensions: editorExtensions,
+    extensions: [...editorExtensions, AutomaticLists.configure({
+      isEnabled: () => !['txt', 'md'].includes(documentRef.current.source?.format ?? 'docx'),
+    })],
     content: document.content,
-    enableInputRules: false,
+    enableInputRules: ['automaticLists'],
     enablePasteRules: false,
     editorProps: {
       attributes: {
@@ -513,6 +521,7 @@ export function App() {
       setError(null);
       setCompatibilityOpen(false);
       setCommentsOpen(false);
+      setOutlineOpen(false);
       setActiveCommentId(null);
       setNotice(`Opened ${result.document.source?.displayName ?? result.document.title}.`);
     },
@@ -1012,7 +1021,8 @@ export function App() {
     return text ? text.split(/\s+/u).length : 0;
   }, [editor, document.content]);
 
-  const selectionFont = String(editor?.getAttributes('textStyle').fontFamily ?? 'Aptos');
+  const headingText = editor?.isActive('heading') || editor?.getAttributes('paragraph').paragraphStyle === 'title';
+  const selectionFont = String(editor?.getAttributes('textStyle').fontFamily ?? (headingText ? 'Cambria' : 'Aptos'));
   const selectionSize = String(editor?.getAttributes('textStyle').fontSize ?? '11pt').replace('pt', '');
   const availableFonts = FONT_FAMILIES.includes(selectionFont) ? FONT_FAMILIES : [selectionFont, ...FONT_FAMILIES];
   const availableSizes = FONT_SIZES.includes(selectionSize) ? FONT_SIZES : [selectionSize, ...FONT_SIZES];
