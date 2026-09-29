@@ -1293,9 +1293,9 @@ select:focus-visible,
   outline: none;
   column-count: var(--document-columns, 1);
   column-gap: var(--document-column-gap, 0.5in);
-  font-family: Aptos, Calibri, Arial, sans-serif;
-  font-size: 11pt;
-  line-height: 1.15;
+  font-family: "Times New Roman", Times, serif;
+  font-size: 12pt;
+  line-height: 1;
   color: var(--paper-text);
   caret-color: var(--accent);
 }
@@ -1374,8 +1374,8 @@ select:focus-visible,
 }
 
 .document-editor p {
-  min-height: 1.15em;
-  margin: 0 0 8pt;
+  min-height: 1em;
+  margin: 0;
 }
 
 .document-editor p[data-paragraph-style="no-spacing"] {

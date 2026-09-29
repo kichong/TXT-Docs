@@ -291,7 +291,7 @@ async function renderPdf(html: string, pageSettings: PageSettings): Promise<Uint
 
 async function saveToPath(request: SaveRequest, path: string): Promise<SaveResult> {
   const parsed = saveRequestSchema.parse(request);
-  const document = parsed.document as EditorDocumentV1;
+  const document = { ...(parsed.document as EditorDocumentV1), title: parse(path).name };
   const format = saveFormatForPath(path);
   if (format === 'pdf') {
     if (!parsed.printHtml) throw new Error('The document print surface was unavailable.');

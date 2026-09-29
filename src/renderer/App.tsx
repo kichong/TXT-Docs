@@ -216,8 +216,8 @@ function mergeClipboardHtml(html: string): string {
 const FONT_FAMILIES = ['Aptos', 'Arial', 'Calibri', 'Cambria', 'Georgia', 'Times New Roman', 'Verdana'];
 const FONT_SIZES = ['8', '9', '10', '11', '12', '14', '16', '18', '20', '24', '28', '32', '36', '48', '64'];
 const BLOCK_STYLES = {
-  normal: { fontSize: 11, lineHeight: '1.15', spacingBeforePt: 0, spacingAfterPt: 8 },
-  'no-spacing': { fontSize: 11, lineHeight: '1', spacingBeforePt: 0, spacingAfterPt: 0 },
+  normal: { fontSize: 12, lineHeight: '1', spacingBeforePt: 0, spacingAfterPt: 0 },
+  'no-spacing': { fontSize: 12, lineHeight: '1', spacingBeforePt: 0, spacingAfterPt: 0 },
   title: { fontSize: 28, lineHeight: '1.1', spacingBeforePt: 0, spacingAfterPt: 14 },
   'heading-1': { fontSize: 24, lineHeight: '1.18', spacingBeforePt: 20, spacingAfterPt: 8 },
   'heading-2': { fontSize: 18, lineHeight: '1.22', spacingBeforePt: 16, spacingAfterPt: 6 },
@@ -403,10 +403,16 @@ export function App() {
   );
 
   useEffect(() => {
-    if (!notice?.startsWith('Saved ')) return;
-    const timeout = window.setTimeout(() => setNotice(null), 3000);
+    if (!notice) return;
+    const timeout = window.setTimeout(() => setNotice(null), 3500);
     return () => window.clearTimeout(timeout);
   }, [notice]);
+
+  useEffect(() => {
+    if (!error) return;
+    const timeout = window.setTimeout(() => setError(null), 5000);
+    return () => window.clearTimeout(timeout);
+  }, [error]);
 
   const editor = useEditor({
     extensions: [...editorExtensions, AutomaticLists.configure({
@@ -612,7 +618,7 @@ export function App() {
         const nextContent = plainText
           ? plainTextToContent(contentToPlainText(current.content))
           : current.content;
-        const next = { ...current, content: nextContent, source: result.source };
+        const next = { ...current, title: result.source.displayName.replace(/\.[^.]+$/u, ''), content: nextContent, source: result.source };
         if (plainText) editor.commands.setContent(nextContent, { emitUpdate: false });
         setDocument(next);
         documentRef.current = next;
@@ -1022,12 +1028,12 @@ export function App() {
   }, [editor, document.content]);
 
   const headingText = editor?.isActive('heading') || editor?.getAttributes('paragraph').paragraphStyle === 'title';
-  const selectionFont = String(editor?.getAttributes('textStyle').fontFamily ?? (headingText ? 'Cambria' : 'Aptos'));
-  const selectionSize = String(editor?.getAttributes('textStyle').fontSize ?? '11pt').replace('pt', '');
+  const selectionFont = String(editor?.getAttributes('textStyle').fontFamily ?? (headingText ? 'Cambria' : 'Times New Roman'));
+  const selectionSize = String(editor?.getAttributes('textStyle').fontSize ?? '12pt').replace('pt', '');
   const availableFonts = FONT_FAMILIES.includes(selectionFont) ? FONT_FAMILIES : [selectionFont, ...FONT_FAMILIES];
   const availableSizes = FONT_SIZES.includes(selectionSize) ? FONT_SIZES : [selectionSize, ...FONT_SIZES];
   const lineHeight = String(
-    editor?.getAttributes(editor?.isActive('heading') ? 'heading' : 'paragraph').lineHeight ?? '1.15',
+    editor?.getAttributes(editor?.isActive('heading') ? 'heading' : 'paragraph').lineHeight ?? '1',
   );
   const busy = operation !== 'ready';
   const updatePresentation = presentUpdate(updateState);
@@ -1099,7 +1105,7 @@ export function App() {
       <ToolButton label="Align center" icon={<AlignCenter size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'center' })} onClick={() => editor.chain().focus().setTextAlign('center').run()} />
       <ToolButton label="Align right" icon={<AlignRight size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'right' })} onClick={() => editor.chain().focus().setTextAlign('right').run()} />
       <ToolButton label="Justify" icon={<AlignJustify size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'justify' })} onClick={() => editor.chain().focus().setTextAlign('justify').run()} />
-      <SelectControl label="Line spacing" value={['1', '1.15', '1.5', '2'].includes(lineHeight) ? lineHeight : '1.15'} onChange={(value) => editor.chain().focus().setLineHeight(value).run()} className="line-select">
+      <SelectControl label="Line spacing" value={['1', '1.15', '1.5', '2'].includes(lineHeight) ? lineHeight : '1'} onChange={(value) => editor.chain().focus().setLineHeight(value).run()} className="line-select">
         <option value="1">1.0</option><option value="1.15">1.15</option><option value="1.5">1.5</option><option value="2">2.0</option>
       </SelectControl>
       <ToolButton label="Clear formatting" icon={<Pilcrow size={18} />} onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()} />

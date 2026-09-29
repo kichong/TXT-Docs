@@ -370,8 +370,8 @@ export async function exportDocx(document: EditorDocumentV1): Promise<Buffer> {
         heading3: { run: { font: 'Cambria', size: 28, color: '202124', bold: true } },
         title: { run: { font: 'Cambria', size: 56, color: '202124' } },
         document: {
-          run: { font: 'Aptos', size: 22, color: '202124' },
-          paragraph: { spacing: { after: 160, line: 276 } },
+          run: { font: 'Times New Roman', size: 24, color: '202124' },
+          paragraph: { spacing: { after: 0, line: 240 } },
         },
       },
       paragraphStyles: [

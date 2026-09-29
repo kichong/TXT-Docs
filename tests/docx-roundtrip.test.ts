@@ -21,6 +21,17 @@ function nodeText(node: JSONContent): string {
 }
 
 describe('DOCX adapter', () => {
+  it('keeps fresh document typography and spacing when reopened', async () => {
+    const document = createBlankDocument('Fresh');
+    document.content = { type: 'doc', content: [
+      { type: 'paragraph', content: [{ type: 'text', text: 'Fresh text' }] },
+    ] };
+    const reopened = await importDocx(await exportDocx(document), source);
+    const paragraph = reopened.content.content?.[0];
+    expect(paragraph?.attrs).toMatchObject({ lineHeight: '1', spacingAfterPt: 0 });
+    expect(paragraph?.content?.[0]?.marks?.find((mark) => mark.type === 'textStyle')?.attrs)
+      .toMatchObject({ fontFamily: 'Times New Roman', fontSize: '12pt' });
+  });
   it('preserves paragraph spacing and default heading fonts across repeated saves', async () => {
     let document = createBlankDocument('Formatting');
     document.content = { type: 'doc', content: [
@@ -185,11 +196,11 @@ describe('DOCX adapter', () => {
     const text = nodes.find((node) => node.text === 'Default styled text');
     expect(text?.marks?.find((mark) => mark.type === 'textStyle')?.attrs).toMatchObject({
       color: '#202124',
-      fontFamily: 'Aptos',
-      fontSize: '11pt',
+      fontFamily: 'Times New Roman',
+      fontSize: '12pt',
     });
     const paragraph = nodes.find((node) => node.type === 'paragraph');
-    expect(paragraph?.attrs).toMatchObject({ lineHeight: '1.15', spacingAfterPt: 8 });
+    expect(paragraph?.attrs).toMatchObject({ lineHeight: '1', spacingAfterPt: 0 });
   });
 
   it('preserves continuous sections, unequal columns, and leading tab indents', async () => {
