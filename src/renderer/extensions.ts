@@ -13,6 +13,7 @@ import { Underline } from '@tiptap/extension-underline';
 import StarterKit from '@tiptap/starter-kit';
 import { DocumentSearch } from './search-extension';
 import { accessibleTextPreviews, highlightForeground } from './color-contrast';
+export { ScreenPages } from './screen-pagination';
 
 // LineHeight's upstream commands always target textStyle, even with node types.
 const ParagraphLineHeight = LineHeight.extend({
@@ -80,6 +81,18 @@ const AccessibleHighlight = Highlight.extend({
 
 export const ParagraphPresentation = Extension.create({
   name: 'paragraphPresentation',
+  addKeyboardShortcuts() {
+    const indent = (delta: number) => {
+      if (this.editor.isActive('table')) return false;
+      if (this.editor.isActive('listItem')) return delta > 0
+        ? this.editor.commands.sinkListItem('listItem')
+        : this.editor.commands.liftListItem('listItem');
+      const type = this.editor.isActive('heading') ? 'heading' : 'paragraph';
+      const current = Number(this.editor.getAttributes(type).tabIndentIn ?? 0);
+      return this.editor.commands.updateAttributes(type, { tabIndentIn: Math.max(0, Math.min(4, current + delta * 0.5)) });
+    };
+    return { Tab: () => indent(1), 'Shift-Tab': () => indent(-1) };
+  },
   addGlobalAttributes() {
     return [
       {

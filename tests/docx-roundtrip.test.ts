@@ -21,6 +21,20 @@ function nodeText(node: JSONContent): string {
 }
 
 describe('DOCX adapter', () => {
+  it('preserves keyboard indentation and selected text color across saves', async () => {
+    let document = createBlankDocument('Formatting');
+    document.content = { type: 'doc', content: [{
+      type: 'paragraph', attrs: { tabIndentIn: 0.5 }, content: [{
+        type: 'text', text: 'Indented color', marks: [{ type: 'textStyle', attrs: { color: '#d93025' } }],
+      }],
+    }] };
+    for (let pass = 0; pass < 2; pass += 1) {
+      document = await importDocx(await exportDocx(document), source);
+      const paragraph = descendants(document.content).find((node) => node.type === 'paragraph');
+      expect(paragraph?.attrs?.tabIndentIn).toBe(0.5);
+      expect(String(paragraph?.content?.[0]?.marks?.find((mark) => mark.type === 'textStyle')?.attrs?.color).toLowerCase()).toBe('#d93025');
+    }
+  });
   it('keeps fresh document typography and spacing when reopened', async () => {
     const document = createBlankDocument('Fresh');
     document.content = { type: 'doc', content: [

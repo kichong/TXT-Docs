@@ -201,9 +201,9 @@ function saveFormatForPath(path: string): SaveFormat {
 }
 
 const PRINT_STYLES = `
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
   html, body { margin: 0; padding: 0; color: #202124; background: #fff; }
-  body { font-family: Aptos, Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.15; }
+  body { font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1; }
   .document-editor { min-height: 0; outline: none; caret-color: transparent; }
   .document-editor [data-text-color] { color: var(--document-text-color) !important; }
   .document-editor mark {
@@ -219,7 +219,7 @@ const PRINT_STYLES = `
   .document-editor [data-document-column] { min-width: 0; }
   .document-editor [data-document-column] > :first-child { margin-top: 0; }
   .document-editor [data-document-column] > :last-child { margin-bottom: 0; }
-  .document-editor p { min-height: 1.15em; margin: 0 0 8pt; }
+  .document-editor p { min-height: 1em; margin: 0; }
   .document-editor p[data-paragraph-style="no-spacing"] { margin-bottom: 0; line-height: 1; }
   .document-editor p[data-paragraph-style="title"] {
     margin: 0 0 14pt; font-family: Cambria, Georgia, serif; font-size: 28pt; line-height: 1.1;
@@ -236,7 +236,7 @@ const PRINT_STYLES = `
   .document-editor img { display: block; max-width: 100%; height: auto; margin: 10pt auto; }
   .document-editor table { width: 100%; margin: 12pt 0; border-collapse: collapse; table-layout: fixed; }
   .document-editor th, .document-editor td {
-    min-width: 60px; padding: 7px 8px; border: 1px solid #bfc3ca; vertical-align: middle;
+    min-width: 60px; padding: 7px 8px; border: 1px solid #bfc3ca; vertical-align: top;
   }
   .document-editor th { background: #f1f3f6; font-weight: 650; }
   .document-editor th p, .document-editor td p { margin: 0; }
@@ -263,7 +263,7 @@ async function createPrintWindow(html: string, pageSettings: PageSettings): Prom
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
-      javascript: false,
+      javascript: true,
     },
   });
   const page = `<!doctype html>
@@ -272,6 +272,7 @@ async function createPrintWindow(html: string, pageSettings: PageSettings): Prom
     <style>${PRINT_STYLES}${printLayoutStyles(pageSettings)}</style></head>
     <body><article class="document-editor">${html}</article></body></html>`;
   await printWindow.loadURL(`data:text/html;base64,${Buffer.from(page, 'utf8').toString('base64')}`);
+  await printWindow.webContents.executeJavaScript(`Promise.all([document.fonts.ready, ...Array.from(document.images, image => image.complete ? Promise.resolve() : new Promise(resolve => { image.onload = resolve; image.onerror = resolve; }))]).then(() => true)`);
   return printWindow;
 }
 
@@ -283,6 +284,7 @@ async function renderPdf(html: string, pageSettings: PageSettings): Promise<Uint
       printBackground: true,
       displayHeaderFooter: false,
       preferCSSPageSize: true,
+      generateTaggedPDF: true,
     });
   } finally {
     printWindow.destroy();

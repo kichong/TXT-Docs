@@ -63,7 +63,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import { AutomaticLists, editorExtensions } from './extensions';
+import { AutomaticLists, ScreenPages, editorExtensions } from './extensions';
 import { updateDocumentSearch } from './search-extension';
 import { contentToPlainText, plainTextToContent } from '../shared/plain-text';
 import {
@@ -396,6 +396,7 @@ export function App() {
   const draggedToolbarGroup = useRef<ToolbarGroupId | null>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const initialExternalOpenChecked = useRef(false);
+  const [pagePosition, setPagePosition] = useState({ current: 1, total: 1 });
   const plainTextMode = document.source?.format === 'txt' || document.source?.format === 'md';
   const hasSectionLayout = useMemo(
     () => (document.content.content ?? []).some((node) => node.type === 'documentSection'),
@@ -415,13 +416,19 @@ export function App() {
   }, [error]);
 
   const editor = useEditor({
-    extensions: [...editorExtensions, AutomaticLists.configure({
+    extensions: [...editorExtensions, ScreenPages.configure({ page: () => documentRef.current.page }), AutomaticLists.configure({
       isEnabled: () => !['txt', 'md'].includes(documentRef.current.source?.format ?? 'docx'),
     })],
     content: document.content,
     enableInputRules: ['automaticLists'],
     enablePasteRules: false,
     editorProps: {
+      handleKeyDown: (_view, event) => {
+        if (event.key !== 'Tab' || !['txt', 'md'].includes(documentRef.current.source?.format ?? 'docx')) return false;
+        event.preventDefault();
+        if (!event.shiftKey) editor?.commands.insertContent({ type: 'text', text: '\t' });
+        return true;
+      },
       attributes: {
         class: 'document-editor',
         spellcheck: 'true',
@@ -445,6 +452,20 @@ export function App() {
   useEffect(() => {
     documentRef.current = document;
   }, [document]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const update = (event: Event) => {
+      const next = (event as CustomEvent<{ current: number; total: number }>).detail;
+      setPagePosition((current) => current.current === next.current && current.total === next.total ? current : next);
+    };
+    editor.view.dom.addEventListener('screen-pagination', update);
+    return () => editor.view.dom.removeEventListener('screen-pagination', update);
+  }, [editor]);
+
+  useEffect(() => {
+    editor?.view.dom.dispatchEvent(new Event('screen-page-settings'));
+  }, [editor, document.page]);
 
   useEffect(() => {
     if (!editor) return;
@@ -1519,6 +1540,7 @@ export function App() {
         <div>
           <span>{wordCount.toLocaleString()} {wordCount === 1 ? 'word' : 'words'}</span>
           <span>Letter</span>
+          <span>Page {pagePosition.current} of {pagePosition.total}</span>
           <span>
             {document.source?.format === 'doc-import'
               ? 'Imported DOC · save as DOCX'

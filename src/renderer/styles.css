@@ -861,6 +861,7 @@ select:focus-visible,
 
 .color-trigger {
   position: relative;
+  border-color: var(--border);
 }
 
 .active-color {
@@ -1273,13 +1274,35 @@ select:focus-visible,
 }
 
 .paper {
+  position: relative;
   width: 8.5in;
   min-height: 11in;
   padding: 1in;
   margin: 0 auto;
   color: #202124;
-  background: var(--paper);
+  background: repeating-linear-gradient(to bottom, var(--paper) 0, var(--paper) 11in, var(--canvas) 11in, var(--canvas) calc(11in + 24px));
   box-shadow: var(--paper-shadow);
+}
+
+.screen-page-gap {
+  display: block;
+  width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  pointer-events: none;
+}
+
+.paper::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom,
+    var(--paper) 0 calc(var(--page-top, 1in) - 2px),
+    transparent calc(var(--page-top, 1in) - 2px) calc(11in - var(--page-bottom, 1in) + 2px),
+    var(--paper) calc(11in - var(--page-bottom, 1in) + 2px) 11in,
+    var(--canvas) 11in calc(11in + 24px));
 }
 
 .paper:focus-within {
@@ -1455,7 +1478,7 @@ select:focus-visible,
   min-width: 60px;
   padding: 7px 8px;
   border: 1px solid var(--paper-border);
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .document-editor th {
