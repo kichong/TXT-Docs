@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | Editor UI, toolbar, page layout, save/close flow | `src/renderer/App.tsx`, `src/renderer/styles.css` | `src/renderer/extensions.ts`, `src/renderer/toolbar-preferences.ts`, `src/renderer/color-contrast.ts` |
 | Rich text behavior, Tab indentation, find, Tiptap schema | `src/renderer/extensions.ts`, `src/renderer/search-extension.ts` | `src/shared/types.ts`, relevant `tests/` |
-| Screen pagination and current/total page indicator | `src/renderer/screen-pagination.ts`, `src/renderer/App.tsx`, `src/renderer/styles.css` | `scripts/screen-pagination-smoke.mjs`, `src/shared/types.ts` |
+| Screen pagination, collapsible page gaps, and current/total page indicator | `src/renderer/screen-pagination.ts`, `src/renderer/App.tsx`, `src/renderer/styles.css` | `scripts/screen-pagination-smoke.mjs`, `src/shared/types.ts` |
 | DOCX fidelity and comments | `src/main/docx/importer.ts`, `src/main/docx/exporter.ts` | `src/shared/types.ts`, `tests/docx-roundtrip.test.ts` |
 | Plain text, Markdown, legacy `.doc` | `src/shared/plain-text.ts`, `src/main/legacy-converter.ts` | `src/main.ts`, `tests/plain-text.test.ts` |
 | File lifecycle, recent files, recovery, launch files | `src/main.ts`, `src/main/storage.ts`, `src/main/launch-files.ts` | `src/preload.ts`, `src/shared/schemas.ts`, `tests/storage.test.ts` |

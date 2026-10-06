@@ -231,6 +231,14 @@ const PRINT_STYLES = `
   .document-editor h2 { margin: 16pt 0 6pt; font-size: 18pt; line-height: 1.22; }
   .document-editor h3 { margin: 13pt 0 5pt; font-size: 14pt; line-height: 1.25; }
   .document-editor ul, .document-editor ol { margin: 0 0 8pt; padding-left: 28px; }
+  .document-editor ol ol { list-style-type: lower-alpha; }
+  .document-editor ol ol ol { list-style-type: lower-roman; }
+  .document-editor ol ol ol ol { list-style-type: decimal; }
+  .document-editor ol ol ol ol ol { list-style-type: lower-alpha; }
+  .document-editor ol ol ol ol ol ol { list-style-type: lower-roman; }
+.document-editor ol ol ol ol ol ol ol { list-style-type: decimal; }
+.document-editor ol ol ol ol ol ol ol ol { list-style-type: lower-alpha; }
+.document-editor ol ol ol ol ol ol ol ol ol { list-style-type: lower-roman; }
   .document-editor li > p { margin-bottom: 3pt; }
   .document-editor a { color: #1f5fc4; text-decoration: underline; }
   .document-editor img { display: block; max-width: 100%; height: auto; margin: 10pt auto; }

@@ -6,9 +6,9 @@ import {
 } from '../src/renderer/toolbar-preferences';
 
 describe('toolbar preferences', () => {
-  it('keeps advanced paste and layout groups optional by default', () => {
-    expect(DEFAULT_TOOLBAR_PREFERENCES.visible).not.toContain('paste');
-    expect(DEFAULT_TOOLBAR_PREFERENCES.visible).not.toContain('layout');
+  it('shows every group by default', () => {
+    expect(DEFAULT_TOOLBAR_PREFERENCES.visible).toContain('paste');
+    expect(DEFAULT_TOOLBAR_PREFERENCES.visible).toContain('layout');
   });
 
   it('repairs stale settings and clamps heading sizes', () => {

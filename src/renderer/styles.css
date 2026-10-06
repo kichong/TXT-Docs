@@ -1276,11 +1276,11 @@ select:focus-visible,
 .paper {
   position: relative;
   width: 8.5in;
-  min-height: 11in;
+  min-height: var(--screen-page-height, 11in);
   padding: 1in;
   margin: 0 auto;
   color: #202124;
-  background: repeating-linear-gradient(to bottom, var(--paper) 0, var(--paper) 11in, var(--canvas) 11in, var(--canvas) calc(11in + 24px));
+  background: repeating-linear-gradient(to bottom, var(--paper) 0, var(--paper) var(--screen-page-height, 11in), var(--canvas) var(--screen-page-height, 11in), var(--canvas) calc(var(--screen-page-height, 11in) + var(--screen-page-gap, 24px)));
   box-shadow: var(--paper-shadow);
 }
 
@@ -1300,9 +1300,9 @@ select:focus-visible,
   pointer-events: none;
   background: repeating-linear-gradient(to bottom,
     var(--paper) 0 calc(var(--page-top, 1in) - 2px),
-    transparent calc(var(--page-top, 1in) - 2px) calc(11in - var(--page-bottom, 1in) + 2px),
-    var(--paper) calc(11in - var(--page-bottom, 1in) + 2px) 11in,
-    var(--canvas) 11in calc(11in + 24px));
+    transparent calc(var(--page-top, 1in) - 2px) calc(var(--screen-page-height, 11in) - var(--page-bottom, 1in) + 2px),
+    var(--paper) calc(var(--screen-page-height, 11in) - var(--page-bottom, 1in) + 2px) var(--screen-page-height, 11in),
+    var(--canvas) var(--screen-page-height, 11in) calc(var(--screen-page-height, 11in) + var(--screen-page-gap, 24px)));
 }
 
 .paper:focus-within {
@@ -1899,3 +1899,13 @@ select:focus-visible,
     transition-duration: 0.01ms !important;
   }
 }
+
+.document-editor ol { list-style-type: decimal; }
+.document-editor ol ol { list-style-type: lower-alpha; }
+.document-editor ol ol ol { list-style-type: lower-roman; }
+.document-editor ol ol ol ol { list-style-type: decimal; }
+.document-editor ol ol ol ol ol { list-style-type: lower-alpha; }
+.document-editor ol ol ol ol ol ol { list-style-type: lower-roman; }
+.document-editor ol ol ol ol ol ol ol { list-style-type: decimal; }
+.document-editor ol ol ol ol ol ol ol ol { list-style-type: lower-alpha; }
+.document-editor ol ol ol ol ol ol ol ol ol { list-style-type: lower-roman; }

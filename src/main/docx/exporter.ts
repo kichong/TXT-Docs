@@ -285,7 +285,7 @@ function sectionChildren(node: JSONContent): JSONContent[] {
 function numberingLevels(kind: 'bullet' | 'ordered') {
   return Array.from({ length: 9 }, (_, level) => ({
     level,
-    format: kind === 'bullet' ? LevelFormat.BULLET : LevelFormat.DECIMAL,
+    format: kind === 'bullet' ? LevelFormat.BULLET : [LevelFormat.DECIMAL, LevelFormat.LOWER_LETTER, LevelFormat.LOWER_ROMAN][level % 3],
     text: kind === 'bullet' ? ['•', '◦', '▪'][level % 3] : `%${level + 1}.`,
     alignment: AlignmentType.LEFT,
     style: {

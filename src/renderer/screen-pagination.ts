@@ -103,6 +103,9 @@ export const ScreenPages = Extension.create<{ page: () => PageSettings }>({
         let frame = 0;
         let signature = '';
         let destroyed = false;
+        let collapsed = false;
+        let pageHeight = PAGE_HEIGHT;
+        let pageGap = PAGE_GAP;
         const publishPosition = () => {
           if (destroyed) return;
           const paper = view.dom.closest<HTMLElement>('.paper');
@@ -110,21 +113,29 @@ export const ScreenPages = Extension.create<{ page: () => PageSettings }>({
           const pages = Number(paper.dataset.pageCount) || 1;
           const scale = paper.getBoundingClientRect().width / paper.offsetWidth || 1;
           const caret = view.coordsAtPos(view.state.selection.head);
-          const current = Math.max(1, Math.min(pages, Math.floor((caret.top - paper.getBoundingClientRect().top) / scale / (PAGE_HEIGHT + PAGE_GAP)) + 1));
+          const current = Math.max(1, Math.min(pages, Math.floor((caret.top - paper.getBoundingClientRect().top) / scale / (pageHeight + pageGap)) + 1));
           view.dom.dispatchEvent(new CustomEvent('screen-pagination', { detail: { current, total: pages } }));
         };
         const layout = () => {
           if (destroyed || view.composing) return;
           const paper = view.dom.closest<HTMLElement>('.paper');
           if (!paper) return;
+          paper.addEventListener('dblclick', toggleGap);
+          paper.title = 'Double-click between pages to hide or show page whitespace';
           const page = settings();
-          const top = page.marginsIn.top * 96;
-          const bottom = page.marginsIn.bottom * 96;
-          const capacity = PAGE_HEIGHT - top - bottom;
-          const stride = PAGE_HEIGHT + PAGE_GAP;
+          const top = collapsed ? 6 : page.marginsIn.top * 96;
+          const bottom = collapsed ? 6 : page.marginsIn.bottom * 96;
+          pageHeight = collapsed ? PAGE_HEIGHT - (page.marginsIn.top + page.marginsIn.bottom) * 96 + 12 : PAGE_HEIGHT;
+          pageGap = collapsed ? 2 : PAGE_GAP;
+          const capacity = pageHeight - top - bottom;
+          const stride = pageHeight + pageGap;
           paper.style.padding = `${top}px ${page.marginsIn.right * 96}px ${bottom}px ${page.marginsIn.left * 96}px`;
           paper.style.setProperty('--page-top', `${top}px`);
           paper.style.setProperty('--page-bottom', `${bottom}px`);
+          paper.style.setProperty('--screen-page-height', `${pageHeight}px`);
+          paper.style.setProperty('--screen-page-gap', `${pageGap}px`);
+          paper.style.minHeight = `${pageHeight}px`;
+          paper.dataset.pageGapCollapsed = String(collapsed);
           paper.style.background = '';
           const measurement = measure(view, paper);
           const decorations: Decoration[] = [];
@@ -132,7 +143,7 @@ export const ScreenPages = Extension.create<{ page: () => PageSettings }>({
           let lastBottom = top;
           const gap = (y: number, end: number, force = false) => {
             const pageIndex = Math.floor(Math.max(0, y - top) / stride);
-            const boundary = pageIndex * stride + PAGE_HEIGHT - bottom;
+            const boundary = pageIndex * stride + pageHeight - bottom;
             return force || end > boundary + 0.5 ? Math.max(0, (pageIndex + 1) * stride + top - y) : 0;
           };
           const pad = (position: number, node: DocumentNode, padding: number, extraStyle = '') => {
@@ -225,7 +236,8 @@ export const ScreenPages = Extension.create<{ page: () => PageSettings }>({
               return added;
             }
             if (node.isTextblock) {
-              if (bounds.height <= capacity) {
+              // Split at visual lines, including short paragraphs, just as print layout does.
+              if (node.childCount === 0) {
                 const padding = gap(bounds.top + offset, bounds.bottom + offset);
                 pad(position, node, padding);
                 lastBottom = Math.max(lastBottom, bounds.bottom + offset + padding);
@@ -256,7 +268,7 @@ export const ScreenPages = Extension.create<{ page: () => PageSettings }>({
             if (page.columns > 1) columnFlow(view.state.doc, -1, 0, page.columns, page.columnGapIn * 96);
             else children(view.state.doc, -1, 0);
             const pages = Math.max(1, Math.floor((lastBottom + bottom - 1) / stride) + 1);
-            paper.style.height = `${pages * PAGE_HEIGHT + (pages - 1) * PAGE_GAP}px`;
+            paper.style.height = `${pages * pageHeight + (pages - 1) * pageGap}px`;
             paper.dataset.pageCount = String(pages);
             const nextSignature = JSON.stringify(parts);
             if (nextSignature !== signature) {
@@ -276,6 +288,19 @@ export const ScreenPages = Extension.create<{ page: () => PageSettings }>({
           cancelAnimationFrame(frame);
           frame = requestAnimationFrame(layout);
         };
+        const toggleGap = (event: MouseEvent) => {
+          const paper = view.dom.closest<HTMLElement>('.paper');
+          if (!paper) return;
+          const scale = paper.getBoundingClientRect().width / paper.offsetWidth || 1;
+          const y = (event.clientY - paper.getBoundingClientRect().top) / scale;
+          const within = y % (pageHeight + pageGap);
+          const top = collapsed ? 6 : settings().marginsIn.top * 96;
+          const bottom = collapsed ? 6 : settings().marginsIn.bottom * 96;
+          if (y < pageHeight - bottom || within > top && within < pageHeight - bottom) return;
+          event.preventDefault();
+          collapsed = !collapsed;
+          schedule();
+        };
         const observer = new ResizeObserver(schedule);
         observer.observe(view.dom);
         view.dom.addEventListener('compositionend', schedule);
@@ -287,6 +312,7 @@ export const ScreenPages = Extension.create<{ page: () => PageSettings }>({
           update: (_view, previous) => previous.doc.eq(view.state.doc) ? publishPosition() : schedule(),
           destroy: () => {
             destroyed = true;
+            view.dom.closest<HTMLElement>('.paper')?.removeEventListener('dblclick', toggleGap);
             cancelAnimationFrame(frame);
             observer.disconnect();
             view.dom.removeEventListener('compositionend', schedule);

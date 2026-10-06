@@ -21,6 +21,21 @@ function nodeText(node: JSONContent): string {
 }
 
 describe('DOCX adapter', () => {
+  it('exports decimal, letter and roman numbering and preserves nested lists', async () => {
+    let document = createBlankDocument('Lists');
+    const paragraph = { type: 'paragraph', content: [{ type: 'text', text: 'Item' }] };
+    const nested = (depth: number): JSONContent => ({ type: 'orderedList', content: [{ type: 'listItem', content: [paragraph, ...(depth ? [nested(depth - 1)] : [])] }] });
+    document.content = { type: 'doc', content: [nested(2)] };
+    for (let pass = 0; pass < 2; pass++) {
+      const buffer = await exportDocx(document);
+      const zip = await JSZip.loadAsync(buffer);
+      const numbering = await zip.file('word/numbering.xml')!.async('string');
+      expect(numbering).toContain('w:val="lowerLetter"');
+      expect(numbering).toContain('w:val="lowerRoman"');
+      document = await importDocx(buffer, source);
+      expect(descendants(document.content).filter((node) => node.type === 'orderedList')).toHaveLength(3);
+    }
+  });
   it('preserves keyboard indentation and selected text color across saves', async () => {
     let document = createBlankDocument('Formatting');
     document.content = { type: 'doc', content: [{

@@ -25,6 +25,8 @@ try {
   const paragraph = (value = text) => ({ type: 'paragraph', content: [{ type: 'text', text: value }] });
   const cases = [
     ['long-paragraph', [paragraph()]],
+    ['many-paragraphs', Array.from({ length: 350 }, (_, i) => ({ ...paragraph('Paragraph ' + i + ': ' + 'Normal prose with wrapping. '.repeat(9)), attrs: { spacingBeforePt: 6, spacingAfterPt: 8 } }))],
+    ['long-list', [{ type: 'orderedList', content: Array.from({ length: 350 }, (_, i) => ({ type: 'listItem', content: [paragraph('List item ' + i + ': ' + 'Normal prose with wrapping. '.repeat(4))] })) }]],
     ['long-table', [{ type: 'table', content: Array.from({ length: 100 }, (_, row) => ({ type: 'tableRow', content: [0, 1].map((column) => ({ type: 'tableCell', content: [paragraph(`Row ${row}, column ${column}.`)] })) })) }]],
     ['tall-table-row', [{ type: 'table', content: [{ type: 'tableRow', content: [paragraph(), paragraph(text.slice(0, 3000))].map((content) => ({ type: 'tableCell', content: [content] })) }] }]],
     ['explicit-columns', [{ type: 'documentSection', attrs: { columns: 2, explicitColumns: true, columnWidthsIn: [3, 3], columnGapIn: 0.5 }, content: [0, 1].map(() => ({ type: 'documentColumn', content: [paragraph()] })) }]],
@@ -93,6 +95,21 @@ try {
     assert.ok(!report.html.includes('screen-page-gap') && !report.html.includes('data-screen-pagination'), `${name}: export must omit screen pagination`);
     assert.equal(report.violations, 0, `${name}: text must stay inside page margins`);
     await page.getByText(new RegExp(`Page \\d+ of ${report.pages}$`)).waitFor();
+    const expandedHeight = await page.locator('.paper').evaluate((paper) => paper.offsetHeight);
+    await page.locator('.paper').dispatchEvent('dblclick', await page.locator('.paper').evaluate((paper) => {
+      const rect = paper.getBoundingClientRect();
+      const scale = rect.width / paper.offsetWidth;
+      return { clientX: rect.left + 10 * scale, clientY: rect.top + 1060 * scale };
+    }));
+    await page.waitForFunction(() => document.querySelector('.paper').dataset.pageGapCollapsed === 'true' && document.querySelector('.paper').dataset.paginationPending === 'false');
+    assert.ok(await page.locator('.paper').evaluate((paper) => paper.offsetHeight) < expandedHeight);
+    assert.equal(await page.evaluate(() => JSON.stringify(document.querySelector('.document-editor').editor.getJSON())), before);
+    await page.locator('.paper').dispatchEvent('dblclick', await page.locator('.paper').evaluate((paper) => {
+      const rect = paper.getBoundingClientRect();
+      const scale = rect.width / paper.offsetWidth;
+      return { clientX: rect.left + 10 * scale, clientY: rect.top + (parseFloat(paper.style.getPropertyValue('--screen-page-height')) + 1) * scale };
+    }));
+    await page.waitForFunction(() => document.querySelector('.paper').dataset.pageGapCollapsed === 'false' && document.querySelector('.paper').dataset.paginationPending === 'false');
     const pdfPath = resolve(`output/pagination/${name}.pdf`);
     await application.evaluate(({ dialog }, filePath) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath }); }, pdfPath);
     await page.evaluate(() => {
@@ -106,9 +123,12 @@ try {
     console.log(name, 'PDF:', printedPages, 'pages');
     assert.equal(Number(report.pages), printedPages, `${name}: editor and PDF page counts must agree`);
     await page.evaluate(() => { document.querySelector('.canvas-scroll').scrollTop = 900; });
-    await page.screenshot({ path: resolve(`output/pagination/${name}.png`) });
+    await page.bringToFront();
+    await page.screenshot({ path: resolve(`output/pagination/${name}.png`), timeout: 60000 });
     await page.evaluate(() => document.querySelector('.document-editor').editor.commands.focus('end'));
+    await page.bringToFront();
     await page.keyboard.insertText(' Editing across pages.');
+    await page.waitForFunction(() => document.querySelector('.document-editor').editor.getText().includes(' Editing across pages.'));
     await page.keyboard.press('Control+z');
     await page.waitForFunction((expected) => JSON.stringify(document.querySelector('.document-editor').editor.getJSON()) === expected, before);
     if (report.widgets) {
@@ -131,5 +151,21 @@ try {
   await page.evaluate(() => document.querySelector('.document-editor').editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph' }] }));
   await page.waitForFunction(() => document.querySelector('.paper').dataset.pageCount === '1');
   await page.getByText('Page 1 of 1', { exact: true }).waitFor();
-  console.log('PASS: paragraphs, tables, tall cells, columns, serialization, and undo.');
+  await page.evaluate(() => {
+    const editor = document.querySelector('.document-editor').editor;
+    editor.commands.setContent({ type: 'doc', content: [{ type: 'orderedList', content: ['First', 'Second', 'Third'].map((text) => ({ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })) }] });
+    let position;
+    editor.state.doc.descendants((node, pos) => { if (node.isText && node.text === 'Second') position = pos; });
+    editor.commands.setTextSelection(position);
+    editor.commands.focus();
+  });
+  await page.keyboard.press('Tab');
+  assert.equal(await page.locator('.document-editor ol ol').evaluate((list) => getComputedStyle(list).listStyleType), 'lower-alpha');
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await page.locator('.document-editor ol ol').count(), 0);
+  await page.getByRole('button', { name: 'Increase indent', exact: true }).click();
+  assert.equal(await page.locator('.document-editor ol ol').count(), 1);
+  await page.getByRole('button', { name: 'Decrease indent', exact: true }).click();
+  assert.equal(await page.locator('.document-editor ol ol').count(), 0);
+  console.log('PASS: pagination, collapsed gaps, lists, serialization, and undo.');
 } finally { await application.evaluate(({ app }) => app.exit(0)).catch(() => {}); await application.close().catch(() => {}); }

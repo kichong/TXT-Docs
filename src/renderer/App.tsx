@@ -846,6 +846,12 @@ export function App() {
   const adjustIndent = useCallback(
     (delta: number) => {
       if (!editor) return;
+      if (editor.isActive('listItem')) {
+        const chain = editor.chain().focus();
+        if (delta > 0) chain.sinkListItem('listItem').run();
+        else chain.liftListItem('listItem').run();
+        return;
+      }
       const type = editor.isActive('heading') ? 'heading' : 'paragraph';
       const current = Number(editor.getAttributes(type).indent ?? 0);
       editor

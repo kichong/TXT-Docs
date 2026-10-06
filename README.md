@@ -11,6 +11,9 @@ TXT Docs is a local-first Windows word processor for everyday DOCX, Markdown, an
 - Paste with source formatting (default), merged formatting, or text only
 - Fonts, sizes, title and heading styles, basic color palettes, highlights, inline formatting, alignment, spacing, lists, and indentation
 - Links, images, simple resizable tables, page breaks, editable review comments, and Word-compatible multi-section layouts with equal or unequal columns
+- Double-click between pages to collapse or expand page whitespace without changing the document
+- Nested numbered lists use numbers, lowercase letters, and lowercase Roman numerals with Tab/Shift+Tab or the indent controls
+- All toolbar groups are shown by default and can be customized
 - Letter-size pages while writing, a live current/total page indicator, and clean, cursor-free PDF output with native printing
 - Resizable document outline and compact four-action file toolbar
 - Recent documents and local crash recovery

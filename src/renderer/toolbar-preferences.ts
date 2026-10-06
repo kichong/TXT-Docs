@@ -20,7 +20,7 @@ export interface ToolbarPreferences {
 
 export const DEFAULT_TOOLBAR_PREFERENCES: ToolbarPreferences = {
   order: TOOLBAR_GROUPS.map((group) => group.id),
-  visible: ['history', 'type', 'emphasis', 'paragraph', 'insert'],
+  visible: TOOLBAR_GROUPS.map((group) => group.id),
   expanded: true,
   headingSizes: { title: 28, h1: 24, h2: 18, h3: 14 },
 };
