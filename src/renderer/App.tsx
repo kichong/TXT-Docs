@@ -560,21 +560,10 @@ export function App() {
   }, []);
 
   const createNew = useCallback(() => {
-    if (!editor || !confirmAbandon()) return;
-    const blank = createBlankDocument();
-    editor.commands.setContent(blank.content, { emitUpdate: false });
-    setDocument(blank);
-    documentRef.current = blank;
-    setDirty(false);
-    setError(null);
-    setNotice('New document ready.');
-    setCommentsOpen(false);
-    setActiveCommentId(null);
-    void window.documentsApi.clearRecovery();
-  }, [confirmAbandon, editor]);
+    void window.documentsApi.newWindow().catch((error) => setError(safeError(error)));
+  }, []);
 
   const openDocument = useCallback(async () => {
-    if (!confirmAbandon()) return;
     setOperation('opening');
     setError(null);
     try {
@@ -585,7 +574,7 @@ export function App() {
     } finally {
       setOperation('ready');
     }
-  }, [applyOpenResult, confirmAbandon]);
+  }, [applyOpenResult]);
 
   const openExternalDocument = useCallback(async () => {
     if (!confirmAbandon()) {

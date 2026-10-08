@@ -18,7 +18,7 @@
 | Screen pagination, collapsible page gaps, and current/total page indicator | `src/renderer/screen-pagination.ts`, `src/renderer/App.tsx`, `src/renderer/styles.css` | `scripts/screen-pagination-smoke.mjs`, `src/shared/types.ts` |
 | DOCX fidelity and comments | `src/main/docx/importer.ts`, `src/main/docx/exporter.ts` | `src/shared/types.ts`, `tests/docx-roundtrip.test.ts` |
 | Plain text, Markdown, legacy `.doc` | `src/shared/plain-text.ts`, `src/main/legacy-converter.ts` | `src/main.ts`, `tests/plain-text.test.ts` |
-| File lifecycle, recent files, recovery, launch files | `src/main.ts`, `src/main/storage.ts`, `src/main/launch-files.ts` | `src/preload.ts`, `src/shared/schemas.ts`, `tests/storage.test.ts` |
+| File lifecycle, multiple windows, recent files, per-window recovery, launch files | `src/main.ts`, `src/main/storage.ts`, `src/main/launch-files.ts` | `src/preload.ts`, `src/shared/schemas.ts`, `tests/storage.test.ts`, `tests/window-recovery.test.ts`, `scripts/multi-window-smoke.mjs` |
 | Electron API / IPC contract | `src/main.ts`, `src/preload.ts`, `src/shared/types.ts`, `src/shared/schemas.ts` | `src/global.d.ts` |
 | Updates and releases | `src/main/updater.ts`, `src/shared/updates.ts`, `package.json` | `.github/workflows/release.yml`, `tests/updates.test.ts` |
 | Compatibility reporting | `src/shared/compatibility-report.ts` | `src/main.ts`, `tests/compatibility-report.test.ts` |

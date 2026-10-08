@@ -14,6 +14,7 @@ function parseUpdateState(value: unknown): AppUpdateState {
 }
 
 const api: DesktopDocumentsApi = {
+  newWindow: () => ipcRenderer.invoke('documents:new'),
   openDocument: () => ipcRenderer.invoke('documents:open'),
   openExternalDocument: () => ipcRenderer.invoke('documents:open-external'),
   cancelExternalOpen: () => ipcRenderer.send('documents:cancel-external'),

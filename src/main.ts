@@ -36,12 +36,33 @@ import type {
   SaveFormat,
 } from './shared/types';
 
-let mainWindow: BrowserWindow | null = null;
+interface FileWindow {
+  window: BrowserWindow;
+  dirty: boolean;
+  forceClose: boolean;
+  closePromptOpen: boolean;
+  recoveryKey: string;
+  externalPath?: string;
+  initialResult?: OpenResult;
+}
+const windows = new Map<number, FileWindow>();
 let storage: LocalDocumentStorage;
 let updateManager: AppUpdateManager;
-let dirty = false;
-let closeAfterSave = false;
-let forceClose = false;
+
+function focusedWindow(): BrowserWindow | null {
+  return BrowserWindow.getFocusedWindow() ?? [...windows.values()].at(-1)?.window ?? null;
+}
+
+function fileWindow(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): FileWindow {
+  const state = windows.get(event.sender.id);
+  if (!state) throw new Error('The file window is no longer available.');
+  return state;
+}
+
+function anyDirty(): boolean {
+  return [...windows.values()].some((state) => state.dirty);
+}
+
 const pendingExternalPaths: string[] = [];
 
 function applicationIconPath(): string {
@@ -58,7 +79,7 @@ function queueExternalDocument(commandLine: string[]): void {
 queueExternalDocument(process.argv.slice(1));
 
 function sendCommand(command: AppCommand): void {
-  mainWindow?.webContents.send('app:command', command);
+  focusedWindow()?.webContents.send('app:command', command);
 }
 
 function createApplicationMenu(): void {
@@ -112,7 +133,7 @@ function createApplicationMenu(): void {
         {
           label: `About TXT Docs v${app.getVersion()}`,
           click: () => {
-            void dialog.showMessageBox(mainWindow!, {
+            void dialog.showMessageBox(focusedWindow()!, {
               type: 'info',
               title: 'About TXT Docs',
               message: `TXT Docs v${app.getVersion()}`,
@@ -155,8 +176,8 @@ async function openPath(path: string): Promise<OpenResult> {
   return { document, recentFiles };
 }
 
-async function chooseOpenPath(): Promise<string | null> {
-  const result = await dialog.showOpenDialog(mainWindow!, {
+async function chooseOpenPath(owner: BrowserWindow): Promise<string | null> {
+  const result = await dialog.showOpenDialog(owner, {
     title: 'Open a document',
     properties: ['openFile'],
     filters: [
@@ -175,10 +196,10 @@ function editableSaveFormat(document: EditorDocumentV1): Exclude<SaveFormat, 'pd
   return format === 'txt' || format === 'md' ? format : 'docx';
 }
 
-async function chooseSavePath(document: EditorDocumentV1): Promise<string | null> {
+async function chooseSavePath(document: EditorDocumentV1, owner: BrowserWindow): Promise<string | null> {
   const format = editableSaveFormat(document);
   const cleanTitle = document.title.replace(/[<>:"/\\|?*\u0000-\u001F]/gu, '').trim() || 'Untitled document';
-  const result = await dialog.showSaveDialog(mainWindow!, {
+  const result = await dialog.showSaveDialog(owner, {
     title: 'Save As',
     defaultPath: `${cleanTitle}.${format}`,
     filters: [
@@ -299,7 +320,7 @@ async function renderPdf(html: string, pageSettings: PageSettings): Promise<Uint
   }
 }
 
-async function saveToPath(request: SaveRequest, path: string): Promise<SaveResult> {
+async function saveToPath(request: SaveRequest, path: string, state: FileWindow): Promise<SaveResult> {
   const parsed = saveRequestSchema.parse(request);
   const document = { ...(parsed.document as EditorDocumentV1), title: parse(path).name };
   const format = saveFormatForPath(path);
@@ -320,46 +341,54 @@ async function saveToPath(request: SaveRequest, path: string): Promise<SaveResul
   await storage.atomicWrite(path, bytes);
   const source = await storage.createSource(path, format, false);
   const recentFiles = await storage.remember(path);
-  await storage.clearRecovery();
-  dirty = false;
+  await storage.clearRecovery(state.recoveryKey);
+  state.dirty = false;
   return { status: 'saved', source, outputFormat: format, displayName: source.displayName, recentFiles };
 }
 
 function installIpcHandlers(): void {
-  ipcMain.handle('documents:open', async () => {
-    const path = await chooseOpenPath();
+  ipcMain.handle('documents:new', () => { createWindow(); });
+  ipcMain.handle('documents:open', async (event) => {
+    const path = await chooseOpenPath(fileWindow(event).window);
+    if (path) createWindow(undefined, await openPath(path));
+    return null;
+  });
+  ipcMain.handle('documents:open-external', async (event) => {
+    const state = fileWindow(event);
+    const result = state.initialResult;
+    state.initialResult = undefined;
+    if (result) return result;
+    const path = state.externalPath;
+    state.externalPath = undefined;
     return path ? openPath(path) : null;
   });
-  ipcMain.handle('documents:open-external', async () => {
-    const path = pendingExternalPaths.shift();
-    return path ? openPath(path) : null;
-  });
-  ipcMain.on('documents:cancel-external', () => {
-    pendingExternalPaths.shift();
+  ipcMain.on('documents:cancel-external', (event) => {
+    fileWindow(event).externalPath = undefined;
   });
   ipcMain.handle('documents:open-recent', async (_event, id: unknown) => {
     if (typeof id !== 'string') throw new Error('Invalid recent file identifier.');
     const path = await storage.getRecentPath(id);
     if (!path) throw new Error('This recent file is no longer available.');
-    return openPath(path);
+    createWindow(undefined, await openPath(path));
+    return null;
   });
-  ipcMain.handle('documents:save', async (_event, request: unknown) => {
+  ipcMain.handle('documents:save', async (event, request: unknown) => {
     const parsed = saveRequestSchema.parse(request) as SaveRequest;
     const source = parsed.document.source;
     const path = source && !source.legacyImported && !source.readOnly ? storage.resolveSource(source.id) : undefined;
     if (!path) {
-      const chosen = await chooseSavePath(parsed.document);
+      const chosen = await chooseSavePath(parsed.document, fileWindow(event).window);
       return chosen
-        ? saveToPath(parsed, chosen)
+        ? saveToPath(parsed, chosen, fileWindow(event))
         : ({ status: 'cancelled', recentFiles: await storage.getRecentFiles() } satisfies SaveResult);
     }
-    return saveToPath(parsed, path);
+    return saveToPath(parsed, path, fileWindow(event));
   });
-  ipcMain.handle('documents:save-as', async (_event, request: unknown) => {
+  ipcMain.handle('documents:save-as', async (event, request: unknown) => {
     const parsed = saveRequestSchema.parse(request) as SaveRequest;
-    const path = await chooseSavePath(parsed.document);
+    const path = await chooseSavePath(parsed.document, fileWindow(event).window);
     return path
-      ? saveToPath(parsed, path)
+      ? saveToPath(parsed, path, fileWindow(event))
       : ({ status: 'cancelled', recentFiles: await storage.getRecentFiles() } satisfies SaveResult);
   });
   ipcMain.handle('documents:report-compatibility', async (_event, request: unknown) => {
@@ -387,8 +416,8 @@ function installIpcHandlers(): void {
       );
     });
   });
-  ipcMain.handle('documents:pick-image', async (): Promise<ImageAsset | null> => {
-    const result = await dialog.showOpenDialog(mainWindow!, {
+  ipcMain.handle('documents:pick-image', async (event): Promise<ImageAsset | null> => {
+    const result = await dialog.showOpenDialog(fileWindow(event).window, {
       title: 'Insert image',
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif'] }],
@@ -407,43 +436,44 @@ function installIpcHandlers(): void {
   }));
   ipcMain.handle('documents:converter-status', () => getLegacyConverterStatus());
   ipcMain.handle('documents:recent', () => storage.getRecentFiles());
-  ipcMain.handle('documents:write-recovery', async (_event, document: unknown) => {
+  ipcMain.handle('documents:write-recovery', async (event, document: unknown) => {
     const parsed = editorDocumentSchema.parse(document) as EditorDocumentV1;
-    await storage.writeRecovery(parsed);
+    await storage.writeRecovery(parsed, fileWindow(event).recoveryKey);
   });
-  ipcMain.handle('documents:read-recovery', () => storage.readRecovery());
-  ipcMain.handle('documents:clear-recovery', () => storage.clearRecovery());
+  ipcMain.handle('documents:read-recovery', (event) => storage.readRecovery(fileWindow(event).recoveryKey));
+  ipcMain.handle('documents:clear-recovery', (event) => storage.clearRecovery(fileWindow(event).recoveryKey));
   ipcMain.handle('updates:get-state', () => updateManager.getState());
   ipcMain.handle('updates:check', () => updateManager.checkForUpdates());
   ipcMain.handle('updates:download', () => updateManager.downloadUpdate());
   ipcMain.handle('updates:install', async (_event, sourceId: unknown) => {
     if (sourceId !== null && typeof sourceId !== 'string') throw new Error('Invalid document identifier.');
-    if (dirty) throw new Error('Save your document before restarting to install the update.');
+    if (anyDirty()) throw new Error('Save all open documents before restarting to install the update.');
     const state = updateManager.getState();
     if (state.phase !== 'downloaded' || !state.availableVersion) throw new Error('No downloaded update is ready to install.');
     await storage.prepareUpdateResume(sourceId, state.availableVersion);
     try {
-      if (dirty) throw new Error('Save your document before restarting to install the update.');
-      forceClose = true;
+      if (anyDirty()) throw new Error('Save all open documents before restarting to install the update.');
+      for (const state of windows.values()) state.forceClose = true;
       updateManager.installUpdate();
     } catch (error) {
-      forceClose = false;
+      for (const state of windows.values()) state.forceClose = false;
       await storage.clearUpdateResume();
       throw error;
     }
   });
-  ipcMain.on('documents:set-dirty', (_event, value: unknown) => {
-    dirty = value === true;
+  ipcMain.on('documents:set-dirty', (event, value: unknown) => {
+    fileWindow(event).dirty = value === true;
   });
-  ipcMain.on('documents:close-after-save', () => {
-    if (dirty) return;
-    forceClose = true;
-    mainWindow?.close();
+  ipcMain.on('documents:close-after-save', (event) => {
+    const state = fileWindow(event);
+    if (state.dirty) return;
+    state.forceClose = true;
+    state.window.close();
   });
 }
 
-function createWindow(): void {
-  mainWindow = new BrowserWindow({
+function createWindow(externalPath?: string, initialResult?: OpenResult, recoveryKey: string = randomUUID()): void {
+  const window = new BrowserWindow({
     width: 1440,
     height: 940,
     minWidth: 860,
@@ -459,8 +489,10 @@ function createWindow(): void {
       sandbox: true,
     },
   });
+  const state: FileWindow = { window, dirty: false, forceClose: false, closePromptOpen: false, recoveryKey, externalPath, initialResult };
+  const windowId = window.webContents.id;
+  windows.set(windowId, state);
 
-  const window = mainWindow;
   window.webContents.on('context-menu', (_event, params) => {
     if (!params.isEditable) return;
     const items: MenuItemConstructorOptions[] = [];
@@ -480,21 +512,21 @@ function createWindow(): void {
   });
 
   const devServer = process.env.VITE_DEV_SERVER_URL;
-  if (devServer) void mainWindow.loadURL(devServer);
-  else void mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
+  if (devServer) void window.loadURL(devServer);
+  else void window.loadFile(join(__dirname, '../renderer/index.html'));
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  window.once('ready-to-show', () => window?.show());
+  window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^(https?:|mailto:)/iu.test(url)) void shell.openExternal(url);
     return { action: 'deny' };
   });
-  mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (url !== mainWindow?.webContents.getURL()) event.preventDefault();
+  window.webContents.on('will-navigate', (event, url) => {
+    if (url !== window?.webContents.getURL()) event.preventDefault();
   });
-  mainWindow.on('close', (event) => {
-    if (forceClose || !dirty) return;
+  window.on('close', (event) => {
+    if (state.forceClose || !state.dirty) return;
     event.preventDefault();
-    const choice = dialog.showMessageBoxSync(mainWindow!, {
+    const choice = dialog.showMessageBoxSync(window, {
       type: 'warning',
       title: 'Unsaved changes',
       message: 'Save changes before closing?',
@@ -505,29 +537,25 @@ function createWindow(): void {
       noLink: true,
     });
     if (choice === 0) {
-      closeAfterSave = true;
-      sendCommand('save-and-close');
+      window.webContents.send('app:command', 'save-and-close');
     } else if (choice === 1) {
-      forceClose = true;
-      void storage.clearRecovery().finally(() => mainWindow?.close());
+      state.forceClose = true;
+      void storage.clearRecovery(state.recoveryKey).finally(() => window?.close());
     }
   });
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-    if (closeAfterSave) closeAfterSave = false;
-  });
+  window.on('closed', () => { windows.delete(windowId); });
 }
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 if (!singleInstanceLock) app.quit();
 
 app.on('second-instance', (_event, commandLine) => {
-  queueExternalDocument(commandLine);
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
-  if (pendingExternalPaths.length) sendCommand('open-external');
+  const path = findLaunchDocumentPath(commandLine) ?? undefined;
+  if (windows.size) createWindow(path);
+  else {
+    // A launch can arrive while storage is still initializing.
+    pendingExternalPaths.push(path ?? '');
+  }
 });
 
 app.whenReady().then(async () => {
@@ -539,15 +567,22 @@ app.whenReady().then(async () => {
   if (resumePath && pendingExternalPaths.length === 0) pendingExternalPaths.push(resumePath);
   updateManager = new AppUpdateManager(app.getVersion(), app.isPackaged, (state) => {
     if (state.phase === 'error') {
-      forceClose = false;
+      for (const state of windows.values()) state.forceClose = false;
       void storage.clearUpdateResume().catch(() => undefined);
     }
-    mainWindow?.webContents.send('app:update-state', state);
+    for (const file of windows.values()) file.window.webContents.send('app:update-state', state);
   });
   updateManager.initialize();
   installIpcHandlers();
   createApplicationMenu();
-  createWindow();
+  const recoveryKeys = await storage.getRecoveryKeys();
+  for (const key of recoveryKeys) createWindow(undefined, undefined, key);
+  const launchPaths = pendingExternalPaths.splice(0);
+  if (launchPaths.length) {
+    for (const path of launchPaths) createWindow(path || undefined);
+  } else {
+    createWindow();
+  }
   if (app.isPackaged) {
     const firstCheck = setTimeout(() => void updateManager.checkForUpdates(), 4_000);
     firstCheck.unref();

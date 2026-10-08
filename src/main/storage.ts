@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import type {
@@ -19,6 +19,7 @@ interface PersistedState {
 }
 
 export class LocalDocumentStorage {
+  private recentWrites: Promise<unknown> = Promise.resolve();
   private readonly statePath: string;
   private readonly recoveryPath: string;
   private readonly sources = new Map<string, string>();
@@ -26,6 +27,20 @@ export class LocalDocumentStorage {
   constructor(private readonly appDataPath: string) {
     this.statePath = join(appDataPath, 'state.json');
     this.recoveryPath = join(appDataPath, 'recovery.json');
+  }
+
+  private recoveryFile(key?: string): string {
+    if (key && !/^[a-zA-Z0-9-]+$/u.test(key)) throw new Error('Invalid recovery identifier.');
+    return key && key !== 'legacy' ? join(dirname(this.recoveryPath), `recovery-${key}.json`) : this.recoveryPath;
+  }
+
+  async getRecoveryKeys(): Promise<string[]> {
+    const files = await readdir(dirname(this.recoveryPath));
+    return files.flatMap((file) => {
+      if (file === 'recovery.json') return ['legacy'];
+      const match = /^recovery-([a-zA-Z0-9-]+)\.json$/u.exec(file);
+      return match ? [match[1]] : [];
+    });
   }
 
   async initialize(): Promise<void> {
@@ -124,7 +139,13 @@ export class LocalDocumentStorage {
     return match?.path;
   }
 
-  async remember(path: string): Promise<RecentFile[]> {
+  remember(path: string): Promise<RecentFile[]> {
+    const operation = this.recentWrites.then(() => this.rememberNow(path));
+    this.recentWrites = operation.catch(() => undefined);
+    return operation;
+  }
+
+  private async rememberNow(path: string): Promise<RecentFile[]> {
     const state = await this.readState();
     const id = this.persistentId(path);
     const next: PersistedRecentFile = {
@@ -183,20 +204,20 @@ export class LocalDocumentStorage {
     }
   }
 
-  async writeRecovery(document: EditorDocumentV1): Promise<void> {
+  async writeRecovery(document: EditorDocumentV1, key?: string): Promise<void> {
     const draft: RecoveryDraft = { document, savedAt: new Date().toISOString() };
-    await this.atomicWrite(this.recoveryPath, Buffer.from(JSON.stringify(draft), 'utf8'));
+    await this.atomicWrite(this.recoveryFile(key), Buffer.from(JSON.stringify(draft), 'utf8'));
   }
 
-  async readRecovery(): Promise<RecoveryDraft | null> {
+  async readRecovery(key?: string): Promise<RecoveryDraft | null> {
     try {
-      return JSON.parse(await readFile(this.recoveryPath, 'utf8')) as RecoveryDraft;
+      return JSON.parse(await readFile(this.recoveryFile(key), 'utf8')) as RecoveryDraft;
     } catch {
       return null;
     }
   }
 
-  async clearRecovery(): Promise<void> {
-    await unlink(this.recoveryPath).catch(() => undefined);
+  async clearRecovery(key?: string): Promise<void> {
+    await unlink(this.recoveryFile(key)).catch(() => undefined);
   }
 }

@@ -153,6 +153,7 @@ export interface RecoveryDraft {
 }
 
 export interface DesktopDocumentsApi {
+  newWindow(): Promise<void>;
   openDocument(): Promise<OpenResult | null>;
   openExternalDocument(): Promise<OpenResult | null>;
   cancelExternalOpen(): void;
