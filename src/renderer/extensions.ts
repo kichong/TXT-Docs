@@ -20,11 +20,11 @@ const ParagraphLineHeight = LineHeight.extend({
   addCommands() {
     return {
       setLineHeight: (lineHeight) => ({ chain }) => chain()
-        .updateAttributes('paragraph', { lineHeight })
-        .updateAttributes('heading', { lineHeight }).run(),
+        .updateAttributes('paragraph', { lineHeight, lineSpacingRule: null })
+        .updateAttributes('heading', { lineHeight, lineSpacingRule: null }).run(),
       unsetLineHeight: () => ({ chain }) => chain()
-        .resetAttributes('paragraph', 'lineHeight')
-        .resetAttributes('heading', 'lineHeight').run(),
+        .resetAttributes('paragraph', ['lineHeight', 'lineSpacingRule'])
+        .resetAttributes('heading', ['lineHeight', 'lineSpacingRule']).run(),
     };
   },
 });
@@ -115,6 +115,11 @@ export const ParagraphPresentation = Extension.create({
               attributes.paragraphStyle
                 ? { 'data-paragraph-style': attributes.paragraphStyle }
                 : {},
+          },
+          lineSpacingRule: {
+            default: null,
+            parseHTML: (element) => element.getAttribute('data-line-spacing-rule'),
+            renderHTML: (attributes) => attributes.lineSpacingRule ? { 'data-line-spacing-rule': attributes.lineSpacingRule } : {},
           },
           spacingBeforePt: {
             default: null,

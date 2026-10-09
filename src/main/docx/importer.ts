@@ -125,12 +125,18 @@ interface ThemeFonts {
   minor?: string;
 }
 
+interface NumberingLevel {
+  kind: 'bullet' | 'ordered' | 'unsupported';
+  start: number;
+}
+
 interface ImportContext {
   zip: JSZip;
   styles: StyleCatalog;
   themeFonts: ThemeFonts;
   relationships: Map<string, string>;
-  numbering: Map<string, Map<number, 'bullet' | 'ordered' | 'unsupported'>>;
+  numbering: Map<string, Map<number, NumberingLevel>>;
+  numberingCounters: Map<string, Map<number, number>>;
   media: Map<string, string>;
   comments: Map<string, DocumentComment>;
   activeCommentIds: string[];
@@ -195,6 +201,14 @@ function parseStyles(xml?: string): StyleCatalog {
   };
 }
 
+function mergeXmlProperties(base: XmlNode, override: XmlNode): XmlNode {
+  const merged = { ...base, ...override };
+  for (const key of ['spacing', 'ind', 'numPr', 'rFonts']) {
+    if (base[key] && override[key]) merged[key] = { ...base[key], ...override[key] };
+  }
+  return merged;
+}
+
 function mergeStyleChain(
   styles: StyleCatalog,
   styleId: string | undefined,
@@ -205,10 +219,7 @@ function mergeStyleChain(
   seen.add(styleId);
   const style = styles.items.get(styleId);
   if (!style) return {};
-  return {
-    ...mergeStyleChain(styles, style.basedOn, property, seen),
-    ...(style[property] ?? {}),
-  };
+  return mergeXmlProperties(mergeStyleChain(styles, style.basedOn, property, seen), style[property] ?? {});
 }
 
 function mergeProperties(
@@ -217,10 +228,7 @@ function mergeProperties(
   property: 'paragraph' | 'run',
 ): XmlNode {
   const resolvedStyleId = styleId ?? styles.defaultParagraphStyleId;
-  return {
-    ...(property === 'paragraph' ? styles.defaultParagraph : styles.defaultRun),
-    ...mergeStyleChain(styles, resolvedStyleId, property),
-  };
+  return mergeXmlProperties(property === 'paragraph' ? styles.defaultParagraph : styles.defaultRun, mergeStyleChain(styles, resolvedStyleId, property));
 }
 
 function parseThemeFonts(xml?: string): ThemeFonts {
@@ -245,26 +253,29 @@ function parseRelationships(xml?: string): Map<string, string> {
   return relationships;
 }
 
-function parseNumbering(xml?: string): Map<string, Map<number, 'bullet' | 'ordered' | 'unsupported'>> {
-  const result = new Map<string, Map<number, 'bullet' | 'ordered' | 'unsupported'>>();
+function parseNumbering(xml?: string): Map<string, Map<number, NumberingLevel>> {
+  const result = new Map<string, Map<number, NumberingLevel>>();
   if (!xml) return result;
   const data = parser.parse(xml);
-  const abstract = new Map<string, Map<number, 'bullet' | 'ordered' | 'unsupported'>>();
+  const abstract = new Map<string, Map<number, NumberingLevel>>();
 
   for (const definition of asArray(data?.numbering?.abstractNum)) {
     const id = attr(definition, 'abstractNumId');
     if (!id) continue;
-    const levels = new Map<number, 'bullet' | 'ordered' | 'unsupported'>();
+    const levels = new Map<number, NumberingLevel>();
     for (const level of asArray(definition.lvl)) {
       const levelNumber = Number(attr(level, 'ilvl') ?? 0);
       const format = attr(level.numFmt, 'val') ?? 'decimal';
       levels.set(
         levelNumber,
-        format === 'bullet'
-          ? 'bullet'
-          : ['decimal', 'lowerLetter', 'upperLetter', 'lowerRoman', 'upperRoman'].includes(format)
-            ? 'ordered'
-            : 'unsupported',
+        {
+          start: Number(attr(level.start, 'val') ?? 1),
+          kind: format === 'bullet'
+            ? 'bullet'
+            : ['decimal', 'lowerLetter', 'upperLetter', 'lowerRoman', 'upperRoman'].includes(format)
+              ? 'ordered'
+              : 'unsupported',
+        },
       );
     }
     abstract.set(id, levels);
@@ -274,7 +285,13 @@ function parseNumbering(xml?: string): Map<string, Map<number, 'bullet' | 'order
     const id = attr(number, 'numId');
     const abstractId = attr(number.abstractNumId, 'val');
     if (id && abstractId && abstract.has(abstractId)) {
-      result.set(id, abstract.get(abstractId)!);
+      const levels = new Map(abstract.get(abstractId)!);
+      for (const override of asArray(number.lvlOverride)) {
+        const level = Number(attr(override, 'ilvl') ?? 0);
+        const original = levels.get(level);
+        if (original) levels.set(level, { ...original, start: Number(attr(override.startOverride, 'val') ?? attr(override.lvl?.start, 'val') ?? original.start) });
+      }
+      result.set(id, levels);
     }
   }
   return result;
@@ -466,7 +483,7 @@ async function runsFromContainer(
 
 interface ParagraphResult {
   node: JSONContent;
-  list?: { id: string; level: number; kind: 'bullet' | 'ordered' };
+  list?: { id: string; level: number; kind: 'bullet' | 'ordered'; start: number };
   pageBreakAfter: boolean;
 }
 
@@ -479,7 +496,7 @@ async function importParagraph(
   const styleName = resolveStyleName(context, styleId);
   const styleParagraph = mergeProperties(context.styles, styleId, 'paragraph');
   const styleRun = mergeProperties(context.styles, styleId, 'run');
-  const pPr = { ...styleParagraph, ...(paragraph.pPr ?? {}) };
+  const pPr = mergeXmlProperties(styleParagraph, paragraph.pPr ?? {});
   const inheritedRun = { ...styleRun, ...(pPr.rPr ?? {}) };
   const { content, hasPageBreak } = await runsFromContainer(paragraph, context, inheritedRun, undefined, orderedChildren);
 
@@ -505,7 +522,9 @@ async function importParagraph(
     attrs.textAlign = alignment === 'both' ? 'justify' : alignment;
   }
   if (leftIndent > 0) attrs.indent = Math.min(8, Math.max(1, Math.round(leftIndent / 360)));
-  attrs.lineHeight = line > 0 ? String(Math.round((line / 240) * 100) / 100) : '1';
+  const lineRule = attr(pPr.spacing, 'lineRule');
+  attrs.lineHeight = line > 0 ? (lineRule === 'exact' || lineRule === 'atLeast' ? `${line / 20}pt` : String(line / 240)) : '1';
+  if (line > 0 && (lineRule === 'exact' || lineRule === 'atLeast')) attrs.lineSpacingRule = lineRule;
   attrs.spacingBeforePt = Number.isFinite(spacingBefore) && spacingBefore >= 0 ? spacingBefore / 20 : 0;
   attrs.spacingAfterPt = Number.isFinite(spacingAfter) && spacingAfter >= 0 ? spacingAfter / 20 : 0;
   if (styleName?.toLowerCase() === 'no spacing') attrs.paragraphStyle = 'no-spacing';
@@ -517,12 +536,21 @@ async function importParagraph(
 
   const numId = attr(pPr.numPr?.numId, 'val');
   const level = Number(attr(pPr.numPr?.ilvl, 'val') ?? 0);
-  const kind = numId ? context.numbering.get(numId)?.get(level) : undefined;
+  const definition = numId ? context.numbering.get(numId)?.get(level) : undefined;
+  const kind = definition?.kind;
+  let start = definition?.start ?? 1;
+  if (numId && definition) {
+    const counters = context.numberingCounters.get(numId) ?? new Map<number, number>();
+    start = counters.has(level) ? counters.get(level)! + 1 : start;
+    counters.set(level, start);
+    for (const depth of counters.keys()) if (depth > level) counters.delete(depth);
+    context.numberingCounters.set(numId, counters);
+  }
   return {
     node,
     list:
       numId && (kind === 'bullet' || kind === 'ordered')
-        ? { id: numId, level, kind }
+        ? { id: numId, level, kind, start }
         : undefined,
     pageBreakAfter: hasPageBreak,
   };
@@ -537,14 +565,18 @@ function appendListParagraph(
   while (
     stack.length &&
     (stack[stack.length - 1].level > list.level
-      || stack[stack.length - 1].kind !== list.kind
-      || stack[stack.length - 1].id !== list.id)
+      || (stack[stack.length - 1].level === list.level
+        && (stack[stack.length - 1].kind !== list.kind || stack[stack.length - 1].id !== list.id)))
   ) {
     stack.pop();
   }
 
   if (!stack.length || stack[stack.length - 1].level < list.level) {
-    const nested: JSONContent = { type: list.kind === 'bullet' ? 'bulletList' : 'orderedList', content: [] };
+    const nested: JSONContent = {
+      type: list.kind === 'bullet' ? 'bulletList' : 'orderedList',
+      ...(list.kind === 'ordered' ? { attrs: { start: list.start } } : {}),
+      content: [],
+    };
     const parent = stack[stack.length - 1];
     if (parent?.lastItem) {
       parent.lastItem.content ??= [];
@@ -586,8 +618,14 @@ async function importTable(table: XmlNode, context: ImportContext, orderedXml?: 
     const cells: JSONContent[] = [];
     for (const cell of asArray(row.tc)) {
       const cellContent: JSONContent[] = [];
+      const listStack: Parameters<typeof appendListParagraph>[2] = [];
       for (const paragraph of asArray(cell.p)) {
-        cellContent.push((await importParagraph(paragraph, context, paragraphOrder[paragraphIndex])).node);
+        const imported = await importParagraph(paragraph, context, paragraphOrder[paragraphIndex]);
+        if (imported.list) appendListParagraph(cellContent, imported, listStack);
+        else {
+          listStack.length = 0;
+          cellContent.push(imported.node);
+        }
         paragraphIndex += 1;
       }
       if (!cellContent.length) cellContent.push({ type: 'paragraph' });
@@ -759,6 +797,7 @@ export async function importDocx(
     themeFonts: parseThemeFonts(themeXml),
     relationships: parseRelationships(relationshipsXml),
     numbering: parseNumbering(numberingXml),
+    numberingCounters: new Map(),
     media: new Map(),
     comments: parseComments(commentsXml),
     activeCommentIds: [],

@@ -36,6 +36,67 @@ describe('DOCX adapter', () => {
       expect(descendants(document.content).filter((node) => node.type === 'orderedList')).toHaveLength(3);
     }
   });
+  it('keeps independent starts, mixed nested lists and table lists through repeated saves', async () => {
+    let document = createBlankDocument('List numbering');
+    const paragraph = (text: string): JSONContent => ({ type: 'paragraph', content: [{ type: 'text', text }] });
+    const list = (start: number, content: JSONContent[] = []): JSONContent => ({ type: 'orderedList', attrs: { start }, content: [
+      { type: 'listItem', content: [paragraph('First'), ...content] },
+      { type: 'listItem', content: [paragraph('Second')] },
+    ] });
+    document.content = { type: 'doc', content: [list(5, [{ type: 'bulletList', content: [
+      { type: 'listItem', content: [paragraph('Bullet'), list(3)] },
+    ] }]), paragraph('Interruption'), list(9), list(1), { type: 'table', content: [
+      { type: 'tableRow', content: [{ type: 'tableCell', content: [list(7)] }] },
+    ] }] };
+    for (let pass = 0; pass < 3; pass++) {
+      document = await importDocx(await exportDocx(document), source);
+      const nodes = descendants(document.content);
+      expect(nodes.filter((node) => node.type === 'orderedList').map((node) => node.attrs?.start)).toEqual([5, 3, 9, 1, 7]);
+      expect(nodes.filter((node) => node.type === 'bulletList')).toHaveLength(1);
+      expect(nodes.filter((node) => node.type === 'orderedList').every((node) => node.content?.length === 2)).toBe(true);
+    }
+  });
+
+  it('imports a numbering override and continues the same list after an ordinary paragraph', async () => {
+    const zip = await JSZip.loadAsync(await exportDocx(createBlankDocument('Continuation')));
+    zip.file('word/numbering.xml', `<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:abstractNum w:abstractNumId="10"><w:lvl w:ilvl="0"><w:start w:val="2"/><w:numFmt w:val="decimal"/></w:lvl></w:abstractNum><w:num w:numId="10"><w:abstractNumId w:val="10"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="5"/></w:lvlOverride></w:num></w:numbering>`);
+    const p = (text: string, numbered = true) => `<w:p>${numbered ? '<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="10"/></w:numPr></w:pPr>' : ''}<w:r><w:t>${text}</w:t></w:r></w:p>`;
+    zip.file('word/document.xml', `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${p('Five')}${p('Six')}${p('Interruption', false)}${p('Seven')}</w:body></w:document>`);
+    let document = await importDocx(await zip.generateAsync({ type: 'uint8array' }), source);
+    for (let pass = 0; pass < 3; pass++) {
+      expect(descendants(document.content).filter((node) => node.type === 'orderedList').map((node) => node.attrs?.start)).toEqual([5, 7]);
+      document = await importDocx(await exportDocx(document), source);
+    }
+  });
+
+  it('preserves single and multiple line spacing on body, bullet and numbered paragraphs', async () => {
+    let document = createBlankDocument('List spacing');
+    const paragraphs = ['1', '1.15', '1.5', '2', '14pt', '18pt'].map((lineHeight): JSONContent => ({
+      type: 'paragraph', attrs: { lineHeight, spacingBeforePt: 0, spacingAfterPt: 0,
+        ...(lineHeight.endsWith('pt') ? { lineSpacingRule: lineHeight === '14pt' ? 'exact' : 'atLeast' } : {}) },
+      content: [{ type: 'text', text: lineHeight }],
+    }));
+    document.content = { type: 'doc', content: [...paragraphs, ...['bulletList', 'orderedList'].map((type) => ({
+      type, content: paragraphs.map((paragraph) => ({ type: 'listItem', content: [paragraph] })),
+    }))] };
+    for (let pass = 0; pass < 3; pass++) {
+      document = await importDocx(await exportDocx(document), source);
+      const nodes = descendants(document.content).filter((node) => node.type === 'paragraph');
+      expect(nodes.map((node) => node.attrs?.lineHeight)).toEqual(Array(3).fill(['1', '1.15', '1.5', '2', '14pt', '18pt']).flat());
+      expect(nodes.every((node) => node.attrs?.spacingBeforePt === 0 && node.attrs?.spacingAfterPt === 0)).toBe(true);
+      expect(nodes.filter((node) => node.attrs?.lineHeight === '14pt').every((node) => node.attrs?.lineSpacingRule === 'exact')).toBe(true);
+      expect(nodes.filter((node) => node.attrs?.lineHeight === '18pt').every((node) => node.attrs?.lineSpacingRule === 'atLeast')).toBe(true);
+    }
+  });
+
+  it('inherits line spacing when a paragraph overrides only the space after it', async () => {
+    const zip = await JSZip.loadAsync(await exportDocx(createBlankDocument('Partial spacing')));
+    zip.file('word/styles.xml', `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:pPrDefault><w:pPr><w:spacing w:line="360" w:before="100"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:styleId="Base"><w:pPr><w:spacing w:after="160"/></w:pPr></w:style><w:style w:type="paragraph" w:styleId="Child"><w:basedOn w:val="Base"/><w:pPr><w:spacing w:before="120"/></w:pPr></w:style></w:styles>`);
+    zip.file('word/document.xml', `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pStyle w:val="Child"/><w:spacing w:after="0"/></w:pPr><w:r><w:t>Inherited spacing</w:t></w:r></w:p></w:body></w:document>`);
+    const document = await importDocx(await zip.generateAsync({ type: 'uint8array' }), source);
+    expect(document.content.content?.[0]?.attrs).toMatchObject({ lineHeight: '1.5', spacingBeforePt: 6, spacingAfterPt: 0 });
+  });
+
   it('preserves keyboard indentation and selected text color across saves', async () => {
     let document = createBlankDocument('Formatting');
     document.content = { type: 'doc', content: [{

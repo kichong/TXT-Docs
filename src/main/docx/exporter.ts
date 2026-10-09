@@ -10,6 +10,7 @@ import {
   HeadingLevel,
   ImageRun,
   LevelFormat,
+  LineRuleType,
   Packer,
   PageBreak,
   Paragraph,
@@ -154,7 +155,8 @@ function paragraphOptions(
   const attrs = node.attrs ?? {};
   const optionalNumber = (value: unknown): number =>
     value === null || value === undefined || value === '' ? Number.NaN : Number(value);
-  const lineHeight = optionalNumber(attrs.lineHeight);
+  const pointSpacing = typeof attrs.lineHeight === 'string' && /^\d+(?:\.\d+)?pt$/u.test(attrs.lineHeight);
+  const lineHeight = pointSpacing ? Number(String(attrs.lineHeight).slice(0, -2)) : optionalNumber(attrs.lineHeight);
   const indent = Number(attrs.indent);
   const spacingBeforePt = optionalNumber(attrs.spacingBeforePt);
   const spacingAfterPt = optionalNumber(attrs.spacingAfterPt);
@@ -178,7 +180,8 @@ function paragraphOptions(
           : undefined,
     spacing: hasSpacing
       ? {
-          line: Number.isFinite(lineHeight) && lineHeight > 0 ? Math.round(lineHeight * 240) : undefined,
+          line: Number.isFinite(lineHeight) && lineHeight > 0 ? Math.round(lineHeight * (pointSpacing ? 20 : 240)) : undefined,
+          lineRule: pointSpacing ? (attrs.lineSpacingRule === 'atLeast' ? LineRuleType.AT_LEAST : LineRuleType.EXACT) : LineRuleType.AUTO,
           before: Number.isFinite(spacingBeforePt) && spacingBeforePt >= 0 ? Math.round(spacingBeforePt * 20) : undefined,
           after: Number.isFinite(spacingAfterPt) && spacingAfterPt >= 0 ? Math.round(spacingAfterPt * 20) : undefined,
         }
@@ -194,7 +197,7 @@ function exportParagraph(node: JSONContent, commentIds: Map<string, number>, num
   return new Paragraph(paragraphOptions(node, commentIds, numbering));
 }
 
-function exportTable(node: JSONContent, commentIds: Map<string, number>): Table {
+function exportTable(node: JSONContent, commentIds: Map<string, number>, numbering: NumberingDefinitions): Table {
   const rows = (node.content ?? []).map(
     (row) =>
       new TableRow({
@@ -203,11 +206,7 @@ function exportTable(node: JSONContent, commentIds: Map<string, number>): Table 
             new TableCell({
               verticalAlign: VerticalAlign.CENTER,
               margins: { top: 100, right: 120, bottom: 100, left: 120 },
-              children: (cell.content ?? []).map((child) =>
-                child.type === 'paragraph' || child.type === 'heading'
-                  ? exportParagraph(child, commentIds)
-                  : new Paragraph(''),
-              ),
+              children: exportNodes(cell.content ?? [], commentIds, numbering),
             }),
         ),
       }),
@@ -227,10 +226,13 @@ function exportTable(node: JSONContent, commentIds: Map<string, number>): Table 
 }
 
 type ExportedBlock = Paragraph | Table;
+type NumberingDefinitions = Array<{ reference: string; levels: ReturnType<typeof numberingLevels> }>;
 
-function exportList(node: JSONContent, commentIds: Map<string, number>, level = 0): ExportedBlock[] {
+function exportList(node: JSONContent, commentIds: Map<string, number>, numbering: NumberingDefinitions, level = 0): ExportedBlock[] {
   const output: ExportedBlock[] = [];
-  const reference = node.type === 'bulletList' ? 'txt-docs-bullets' : 'txt-docs-numbering';
+  const reference = `txt-docs-list-${numbering.length}`;
+  const start = Math.max(1, Math.trunc(Number(node.attrs?.start) || 1));
+  numbering.push({ reference, levels: numberingLevels(node.type === 'bulletList' ? 'bullet' : 'ordered', level, start) });
   for (const item of node.content ?? []) {
     let wroteParagraph = false;
     for (const child of item.content ?? []) {
@@ -238,9 +240,9 @@ function exportList(node: JSONContent, commentIds: Map<string, number>, level = 
         output.push(exportParagraph(child, commentIds, { reference, level }));
         wroteParagraph = true;
       } else if (child.type === 'bulletList' || child.type === 'orderedList') {
-        output.push(...exportList(child, commentIds, Math.min(8, level + 1)));
+        output.push(...exportList(child, commentIds, numbering, Math.min(8, level + 1)));
       } else if (child.type === 'table') {
-        output.push(exportTable(child, commentIds));
+        output.push(exportTable(child, commentIds, numbering));
       }
     }
     if (!wroteParagraph) output.push(exportParagraph({ type: 'paragraph' }, commentIds, { reference, level }));
@@ -248,12 +250,12 @@ function exportList(node: JSONContent, commentIds: Map<string, number>, level = 
   return output;
 }
 
-function exportNodes(nodes: JSONContent[], commentIds: Map<string, number>): ExportedBlock[] {
+function exportNodes(nodes: JSONContent[], commentIds: Map<string, number>, numbering: NumberingDefinitions): ExportedBlock[] {
   const blocks: ExportedBlock[] = [];
   for (const node of nodes) {
     if (node.type === 'paragraph' || node.type === 'heading') blocks.push(exportParagraph(node, commentIds));
-    else if (node.type === 'bulletList' || node.type === 'orderedList') blocks.push(...exportList(node, commentIds));
-    else if (node.type === 'table') blocks.push(exportTable(node, commentIds));
+    else if (node.type === 'bulletList' || node.type === 'orderedList') blocks.push(...exportList(node, commentIds, numbering));
+    else if (node.type === 'table') blocks.push(exportTable(node, commentIds, numbering));
     else if (node.type === 'image') {
       blocks.push(exportParagraph({ type: 'paragraph', content: [node] }, commentIds));
     } else if (node.type === 'pageBreak') {
@@ -269,8 +271,8 @@ function exportNodes(nodes: JSONContent[], commentIds: Map<string, number>): Exp
   return blocks.length ? blocks : [new Paragraph('')];
 }
 
-function exportBlocks(document: EditorDocumentV1, commentIds: Map<string, number>): ExportedBlock[] {
-  return exportNodes(document.content.content ?? [], commentIds);
+function exportBlocks(document: EditorDocumentV1, commentIds: Map<string, number>, numbering: NumberingDefinitions): ExportedBlock[] {
+  return exportNodes(document.content.content ?? [], commentIds, numbering);
 }
 
 function sectionChildren(node: JSONContent): JSONContent[] {
@@ -282,9 +284,10 @@ function sectionChildren(node: JSONContent): JSONContent[] {
   return children;
 }
 
-function numberingLevels(kind: 'bullet' | 'ordered') {
+function numberingLevels(kind: 'bullet' | 'ordered', targetLevel = 0, start = 1) {
   return Array.from({ length: 9 }, (_, level) => ({
     level,
+    start: level === targetLevel ? start : 1,
     format: kind === 'bullet' ? LevelFormat.BULLET : [LevelFormat.DECIMAL, LevelFormat.LOWER_LETTER, LevelFormat.LOWER_ROMAN][level % 3],
     text: kind === 'bullet' ? ['•', '◦', '▪'][level % 3] : `%${level + 1}.`,
     alignment: AlignmentType.LEFT,
@@ -301,6 +304,7 @@ function numberingLevels(kind: 'bullet' | 'ordered') {
 
 export async function exportDocx(document: EditorDocumentV1): Promise<Buffer> {
   const commentIds = new Map((document.comments ?? []).map((comment, index) => [comment.id, index]));
+  const numbering: NumberingDefinitions = [];
   const pageProperties = {
     size: { width: 12240, height: 15840 },
     margin: {
@@ -334,7 +338,7 @@ export async function exportDocx(document: EditorDocumentV1): Promise<Buffer> {
             },
             page: pageProperties,
           },
-          children: exportNodes(sectionChildren(node), commentIds),
+          children: exportNodes(sectionChildren(node), commentIds, numbering),
         };
       })
     : [
@@ -347,7 +351,7 @@ export async function exportDocx(document: EditorDocumentV1): Promise<Buffer> {
             },
             page: pageProperties,
           },
-          children: exportBlocks(document, commentIds),
+          children: exportBlocks(document, commentIds, numbering),
         },
       ];
   const docx = new Document({
@@ -386,10 +390,7 @@ export async function exportDocx(document: EditorDocumentV1): Promise<Buffer> {
       ],
     },
     numbering: {
-      config: [
-        { reference: 'txt-docs-bullets', levels: numberingLevels('bullet') },
-        { reference: 'txt-docs-numbering', levels: numberingLevels('ordered') },
-      ],
+      config: numbering,
     },
     sections,
   });

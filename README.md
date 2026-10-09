@@ -4,7 +4,7 @@ TXT Docs is a local-first Windows word processor for everyday DOCX, Markdown, an
 
 ## V1 features
 
-- Open multiple files in separate windows; New, Ctrl+N, and launching the app again create a blank window
+- Open multiple files in separate windows; reopening a file focuses its existing window. New, Ctrl+N, and launching the app again create a blank window
 - Create, open, edit, and save `.docx`, `.txt`, and `.md`
 - Open supported documents directly from Windows **Open with** in a separate window
 - Save As `.docx`, `.pdf`, `.txt`, or `.md` from one native format picker
@@ -13,6 +13,7 @@ TXT Docs is a local-first Windows word processor for everyday DOCX, Markdown, an
 - Fonts, sizes, title and heading styles, basic color palettes, highlights, inline formatting, alignment, spacing, lists, and indentation
 - Links, images, simple resizable tables, page breaks, editable review comments, and Word-compatible multi-section layouts with equal or unequal columns
 - Double-click between pages to collapse or expand page whitespace without changing the document
+- Numbered list starts and continuations survive DOCX saves; Normal paragraphs and lists default to single (1.0) line spacing
 - Nested numbered lists use numbers, lowercase letters, and lowercase Roman numerals with Tab/Shift+Tab or the indent controls
 - All toolbar groups are shown by default and can be customized
 - Letter-size pages while writing, a live current/total page indicator, and clean, cursor-free PDF output with native printing

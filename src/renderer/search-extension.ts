@@ -27,15 +27,18 @@ export function findDocumentMatches(document: ProseMirrorNode, query: string): D
   if (!normalizedQuery) return [];
   const matches: DocumentSearchMatch[] = [];
   document.descendants((node, position) => {
-    if (!node.isText || !node.text) return;
-    const text = node.text.toLocaleLowerCase();
+    if (!node.isTextblock) return;
+    // Formatting splits text nodes, but it must not split searchable words.
+    // A sentinel keeps searches from joining text across an inline image/break.
+    const text = node.textBetween(0, node.content.size, '', '\u0000').toLocaleLowerCase();
     let offset = 0;
     while (offset <= text.length - normalizedQuery.length) {
       const found = text.indexOf(normalizedQuery, offset);
       if (found < 0) break;
-      matches.push({ from: position + found, to: position + found + normalizedQuery.length });
+      matches.push({ from: position + 1 + found, to: position + 1 + found + normalizedQuery.length });
       offset = found + Math.max(1, normalizedQuery.length);
     }
+    return false;
   });
   return matches;
 }

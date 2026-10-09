@@ -20,6 +20,7 @@ interface PersistedState {
 
 export class LocalDocumentStorage {
   private recentWrites: Promise<unknown> = Promise.resolve();
+  private readonly recoveryWrites = new Map<string, Promise<unknown>>();
   private readonly statePath: string;
   private readonly recoveryPath: string;
   private readonly sources = new Map<string, string>();
@@ -50,7 +51,10 @@ export class LocalDocumentStorage {
   private async readState(): Promise<PersistedState> {
     try {
       const value = JSON.parse(await readFile(this.statePath, 'utf8')) as PersistedState;
-      return { recentFiles: Array.isArray(value.recentFiles) ? value.recentFiles.slice(0, 8) : [] };
+      return { recentFiles: Array.isArray(value?.recentFiles) ? value.recentFiles.filter((entry) =>
+        entry && typeof entry.id === 'string' && typeof entry.path === 'string' &&
+        typeof entry.displayName === 'string' && typeof entry.lastOpenedAt === 'string',
+      ).slice(0, 8) : [] };
     } catch {
       return { recentFiles: [] };
     }
@@ -204,9 +208,20 @@ export class LocalDocumentStorage {
     }
   }
 
-  async writeRecovery(document: EditorDocumentV1, key?: string): Promise<void> {
+  private queueRecovery(path: string, action: () => Promise<void>): Promise<void> {
+    const operation = (this.recoveryWrites.get(path) ?? Promise.resolve()).catch(() => undefined).then(action);
+    this.recoveryWrites.set(path, operation);
+    void operation.finally(() => {
+      if (this.recoveryWrites.get(path) === operation) this.recoveryWrites.delete(path);
+    }).catch(() => undefined);
+    return operation;
+  }
+
+  writeRecovery(document: EditorDocumentV1, key?: string): Promise<void> {
     const draft: RecoveryDraft = { document, savedAt: new Date().toISOString() };
-    await this.atomicWrite(this.recoveryFile(key), Buffer.from(JSON.stringify(draft), 'utf8'));
+    const path = this.recoveryFile(key);
+    const bytes = Buffer.from(JSON.stringify(draft), 'utf8');
+    return this.queueRecovery(path, () => this.atomicWrite(path, bytes));
   }
 
   async readRecovery(key?: string): Promise<RecoveryDraft | null> {
@@ -217,7 +232,10 @@ export class LocalDocumentStorage {
     }
   }
 
-  async clearRecovery(key?: string): Promise<void> {
-    await unlink(this.recoveryFile(key)).catch(() => undefined);
+  clearRecovery(key?: string): Promise<void> {
+    const path = this.recoveryFile(key);
+    return this.queueRecovery(path, () => unlink(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+    }));
   }
 }

@@ -367,6 +367,7 @@ export function App() {
   const documentRef = useRef(document);
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
   const [operation, setOperation] = useState<OperationState>('ready');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -490,12 +491,12 @@ export function App() {
 
   useEffect(() => {
     documentRef.current = document;
-    if (!dirty) return;
+    if (!dirty || operation === 'saving') return;
     const timer = window.setTimeout(() => {
       void window.documentsApi.writeRecovery(documentRef.current).catch(() => undefined);
     }, 1200);
     return () => window.clearTimeout(timer);
-  }, [document, dirty]);
+  }, [document, dirty, operation]);
 
   useEffect(() => {
     void window.documentsApi
@@ -601,7 +602,10 @@ export function App() {
 
   const saveDocument = useCallback(
     async (saveAs = false, closeWhenDone = false): Promise<boolean> => {
-      if (!editor) return false;
+      if (!editor || savingRef.current) return false;
+      savingRef.current = true;
+      const originalDocument = documentRef.current;
+      const originalEditorDocument = editor.state.doc;
       const current: EditorDocumentV1 = { ...documentRef.current, content: editor.getJSON() };
       const savedSelection = { from: editor.state.selection.from, to: editor.state.selection.to };
       setOperation('saving');
@@ -624,26 +628,44 @@ export function App() {
           return true;
         }
         if (!result.source) return false;
+        const changedDuringSave = documentRef.current !== originalDocument || !editor.state.doc.eq(originalEditorDocument);
         const plainText = result.source.format === 'txt' || result.source.format === 'md';
         const nextContent = plainText
           ? plainTextToContent(contentToPlainText(current.content))
           : current.content;
-        const next = { ...current, title: result.source.displayName.replace(/\.[^.]+$/u, ''), content: nextContent, source: result.source };
-        if (plainText) editor.commands.setContent(nextContent, { emitUpdate: false });
+        const next = {
+          ...(changedDuringSave ? documentRef.current : current),
+          title: result.source.displayName.replace(/\.[^.]+$/u, ''),
+          content: changedDuringSave ? editor.getJSON() : nextContent,
+          source: result.source,
+        };
+        if (plainText && !changedDuringSave) editor.commands.setContent(nextContent, { emitUpdate: false });
         setDocument(next);
         documentRef.current = next;
-        setDirty(false);
+        setDirty(changedDuringSave);
+        dirtyRef.current = changedDuringSave;
+        window.documentsApi.setDirty(changedDuringSave);
+        if (changedDuringSave) {
+          await window.documentsApi.writeRecovery(next);
+          setNotice('Saved the earlier changes. Your latest edits still need saving.');
+          return false;
+        }
         setNotice(
           plainText
             ? `Saved ${result.source.displayName} as plain text. Formatting tools are off for this file.`
             : `Saved ${result.source.displayName}.`,
         );
-        if (closeWhenDone) window.documentsApi.requestCloseAfterSave();
+        if (closeWhenDone) {
+          dirtyRef.current = false;
+          window.documentsApi.setDirty(false);
+          window.documentsApi.requestCloseAfterSave();
+        }
         return true;
       } catch (saveError) {
         setError(safeError(saveError));
         return false;
       } finally {
+        savingRef.current = false;
         setOperation('ready');
         if (!closeWhenDone) {
           window.requestAnimationFrame(() => {
@@ -796,6 +818,7 @@ export function App() {
           .setHeading({ level: Number(style.slice(-1)) as 1 | 2 | 3 })
           .updateAttributes('heading', {
             lineHeight: selectedStyle.lineHeight,
+            lineSpacingRule: null,
             spacingBeforePt: selectedStyle.spacingBeforePt,
             spacingAfterPt: selectedStyle.spacingAfterPt,
           });
@@ -805,6 +828,7 @@ export function App() {
           .updateAttributes('paragraph', {
             paragraphStyle: style === 'no-spacing' || style === 'title' ? style : null,
             lineHeight: selectedStyle.lineHeight,
+            lineSpacingRule: null,
             spacingBeforePt: selectedStyle.spacingBeforePt,
             spacingAfterPt: selectedStyle.spacingAfterPt,
           });
@@ -1121,8 +1145,9 @@ export function App() {
       <ToolButton label="Align center" icon={<AlignCenter size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'center' })} onClick={() => editor.chain().focus().setTextAlign('center').run()} />
       <ToolButton label="Align right" icon={<AlignRight size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'right' })} onClick={() => editor.chain().focus().setTextAlign('right').run()} />
       <ToolButton label="Justify" icon={<AlignJustify size={19} />} className="alignment-tool" active={editor.isActive({ textAlign: 'justify' })} onClick={() => editor.chain().focus().setTextAlign('justify').run()} />
-      <SelectControl label="Line spacing" value={['1', '1.15', '1.5', '2'].includes(lineHeight) ? lineHeight : '1'} onChange={(value) => editor.chain().focus().setLineHeight(value).run()} className="line-select">
+      <SelectControl label="Line spacing" value={lineHeight} onChange={(value) => editor.chain().focus().setLineHeight(value).run()} className="line-select">
         <option value="1">1.0</option><option value="1.15">1.15</option><option value="1.5">1.5</option><option value="2">2.0</option>
+        {!['1', '1.15', '1.5', '2'].includes(lineHeight) && <option value={lineHeight}>{lineHeight}</option>}
       </SelectControl>
       <ToolButton label="Clear formatting" icon={<Pilcrow size={18} />} onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()} />
     </>;

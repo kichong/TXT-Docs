@@ -1,9 +1,38 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { LocalDocumentStorage } from '../src/main/storage';
 import { createBlankDocument } from '../src/shared/types';
+
+it('clears recovery after a pending write and preserves the order of later writes', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'txt-recovery-order-'));
+  try {
+    const storage = new LocalDocumentStorage(directory);
+    await storage.initialize();
+    const write = storage.atomicWrite.bind(storage);
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(storage, 'atomicWrite').mockImplementationOnce(async (path, bytes) => {
+      await blocked;
+      await write(path, bytes);
+    });
+    const pending = storage.writeRecovery(createBlankDocument('Old'), 'first');
+    const cleared = storage.clearRecovery('first');
+    release();
+    await Promise.all([pending, cleared]);
+    expect(await storage.readRecovery('first')).toBeNull();
+    await Promise.all([
+      storage.writeRecovery(createBlankDocument('Earlier'), 'first'),
+      storage.writeRecovery(createBlankDocument('Latest'), 'first'),
+    ]);
+    expect((await storage.readRecovery('first'))?.document.title).toBe('Latest');
+    vi.spyOn(storage, 'atomicWrite').mockRejectedValueOnce(new Error('Write failed'));
+    await expect(storage.writeRecovery(createBlankDocument(), 'first')).rejects.toThrow('Write failed');
+    await storage.clearRecovery('first');
+    expect(await storage.readRecovery('first')).toBeNull();
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 
 it('keeps each window recovery independent and discovers drafts after restart, including legacy recovery', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'txt-window-recovery-'));

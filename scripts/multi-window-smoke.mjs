@@ -102,7 +102,57 @@ try {
   assert.ok((await content(first)).includes('first unsaved'));
   const recent = await first.evaluate((api) => window[api].getRecentFiles(), api);
   await first.evaluate(({ api, id }) => window[api].openRecent(id), { api, id: recent.find((file) => file.displayName === (docs ? 'opened.txt' : 'opened.csv')).id });
-  await waitWindows(3);
+  await waitWindows(docs ? 2 : 3);
+  if (docs) {
+    await first.evaluate(() => window.documentsApi.openDocument());
+    await waitWindows(2);
+    await application.evaluate(({ dialog }, path) => {
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath: path });
+    }, openedPath);
+    const collision = await first.evaluate(async () => {
+      const draft = await window.documentsApi.readRecovery();
+      try {
+        await window.documentsApi.saveDocumentAs({ document: draft.document, overwriteCompatibilityIssues: true });
+        return false;
+      } catch (error) {
+        return error.message.includes('already open');
+      }
+    });
+    assert.equal(collision, true, 'Save As must not overwrite a file open in another window');
+    await edit(opened, ' saved on close');
+    await opened.waitForTimeout(1600);
+    const openedId = await (await application.browserWindow(opened)).evaluate((window) => window.id);
+    await application.evaluate(({ dialog }) => {
+      globalThis.closeChoice = 0;
+      dialog.showSaveDialog = async () => ({ canceled: true });
+    });
+    // Existing files save directly; force a failed write to verify the window stays open.
+    await application.evaluate(({ ipcMain }) => {
+      globalThis.originalSave = ipcMain._invokeHandlers.get('documents:save');
+      ipcMain.removeHandler('documents:save');
+      ipcMain.handle('documents:save', () => { throw new Error('Test save failure'); });
+    });
+    await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).close(), openedId);
+    await opened.getByText('Test save failure', { exact: false }).waitFor();
+    assert.equal(application.windows().length, 2, 'Failed save must keep the document open');
+    await application.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('documents:save');
+      ipcMain.handle('documents:save', () => ({ status: 'cancelled', recentFiles: [] }));
+    });
+    await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).close(), openedId);
+    await opened.waitForTimeout(300);
+    assert.equal(application.windows().length, 2, 'Cancelled save must keep the document open');
+    await application.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('documents:save');
+      ipcMain.handle('documents:save', globalThis.originalSave);
+    });
+    await application.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).close(), openedId);
+    await waitWindows(1);
+    assert.ok((await readFile(openedPath, 'utf8')).includes('saved on close'), 'Save on close writes edits before closing');
+    await first.evaluate((id) => window.documentsApi.openRecent(id), recent.find((file) => file.displayName === 'opened.txt').id);
+    const reopened = (await waitWindows(2))[1];
+    assert.ok((await content(reopened)).includes('saved on close'));
+  }
 
   await first.bringToFront();
   if (docs) await application.evaluate(({ Menu, BrowserWindow }, id) => {
@@ -110,16 +160,16 @@ try {
     Menu.getApplicationMenu().items[0].submenu.items[0].click();
   }, firstId);
   else await first.keyboard.press('Control+n');
-  await waitWindows(4);
+  await waitWindows(docs ? 3 : 4);
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;
   const relaunch = spawn(executablePath, [...baseArgs, `--user-data-dir=${profile}`], { cwd: root, env: environment, windowsHide: true, stdio: 'ignore' });
-  await waitWindows(5);
+  await waitWindows(docs ? 4 : 5);
   await new Promise((done, reject) => { if (relaunch.exitCode !== null) return done(); relaunch.once('exit', done); relaunch.once('error', reject); });
   const external = spawn(executablePath, [...baseArgs, `--user-data-dir=${profile}`, openedPath], { cwd: root, env: environment, windowsHide: true, stdio: 'ignore' });
-  const pages = await waitWindows(6);
+  const pages = await waitWindows(docs ? 4 : 6);
   await pages.at(-1).waitForTimeout(300);
-  assert.ok((await content(pages.at(-1))).includes('opened'));
+  assert.ok((await content(docs ? pages[1] : pages.at(-1))).includes('opened'));
   assert.ok((await content(first)).includes('first unsaved'));
   await new Promise((done, reject) => { if (external.exitCode !== null) return done(); external.once('exit', done); external.once('error', reject); });
   await application.evaluate(({ app }) => { setImmediate(() => app.exit(0)); });

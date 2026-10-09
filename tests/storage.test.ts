@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,6 +12,16 @@ afterEach(async () => {
 });
 
 describe('local document storage', () => {
+  it('ignores malformed recent entries without blocking normal file handling', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'txt-docs-state-'));
+    cleanup.push(directory);
+    await writeFile(join(directory, 'state.json'), JSON.stringify({ recentFiles: [null, {}, { path: 123 }] }));
+    const storage = new LocalDocumentStorage(directory);
+    await storage.initialize();
+    expect(await storage.getRecentFiles()).toEqual([]);
+    await storage.remember(join(directory, 'valid.txt'));
+    expect(await storage.getRecentFiles()).toHaveLength(1);
+  });
   it('reopens only the selected update document, once, across an app restart', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'txt-docs-update-'));
     cleanup.push(directory);

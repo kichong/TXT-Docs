@@ -12,7 +12,7 @@ function listLines(node: JSONContent, depth = 0): string[] {
   return (node.content ?? []).flatMap((item, index) => {
     const blocks = item.content ?? [];
     const first = blocks.find((block) => block.type === 'paragraph' || block.type === 'heading');
-    const prefix = ordered ? `${index + 1}. ` : '- ';
+    const prefix = ordered ? `${Math.max(1, Math.trunc(Number(node.attrs?.start) || 1)) + index}. ` : '- ';
     const indentation = '  '.repeat(depth);
     const lines = [`${indentation}${prefix}${first ? inlineText(first) : ''}`];
     for (const child of blocks) {

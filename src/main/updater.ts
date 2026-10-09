@@ -36,7 +36,7 @@ export class AppUpdateManager {
     if (this.initialized || !this.canCheck) return;
     this.initialized = true;
     this.updater.autoDownload = false;
-    this.updater.autoInstallOnAppQuit = true;
+    this.updater.autoInstallOnAppQuit = false;
     this.updater.allowPrerelease = false;
     this.updater.logger = console;
 

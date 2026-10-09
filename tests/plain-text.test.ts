@@ -47,3 +47,7 @@ describe('plain text adapters', () => {
     expect(contentToPlainText(content)).toBe('Title\n- First\n- Second\nA\tB');
   });
 });
+
+it('keeps ordered starting numbers in plain text exports', () => {
+  expect(contentToPlainText({ type: 'doc', content: [{ type: 'orderedList', attrs: { start: 5 }, content: ['First', 'Second'].map((text) => ({ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })) }] })).toBe('5. First\n6. Second');
+});

@@ -10,7 +10,7 @@ import {
 } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { basename, extname, join, parse } from 'node:path';
+import { basename, extname, join, parse, resolve } from 'node:path';
 import { importDocx } from './main/docx/importer';
 import { exportDocx } from './main/docx/exporter';
 import { convertLegacyDoc, getLegacyConverterStatus } from './main/legacy-converter';
@@ -44,6 +44,7 @@ interface FileWindow {
   recoveryKey: string;
   externalPath?: string;
   initialResult?: OpenResult;
+  documentPath?: string;
 }
 const windows = new Map<number, FileWindow>();
 let storage: LocalDocumentStorage;
@@ -260,7 +261,7 @@ const PRINT_STYLES = `
 .document-editor ol ol ol ol ol ol ol { list-style-type: decimal; }
 .document-editor ol ol ol ol ol ol ol ol { list-style-type: lower-alpha; }
 .document-editor ol ol ol ol ol ol ol ol ol { list-style-type: lower-roman; }
-  .document-editor li > p { margin-bottom: 3pt; }
+  .document-editor li > p { margin-bottom: 0; }
   .document-editor a { color: #1f5fc4; text-decoration: underline; }
   .document-editor img { display: block; max-width: 100%; height: auto; margin: 10pt auto; }
   .document-editor table { width: 100%; margin: 12pt 0; border-collapse: collapse; table-layout: fixed; }
@@ -324,6 +325,9 @@ async function saveToPath(request: SaveRequest, path: string, state: FileWindow)
   const parsed = saveRequestSchema.parse(request);
   const document = { ...(parsed.document as EditorDocumentV1), title: parse(path).name };
   const format = saveFormatForPath(path);
+  if (format !== 'pdf' && [...windows.values()].some((other) => other !== state && other.documentPath === resolve(path).toLowerCase())) {
+    throw new Error('This document is already open in another window. Save to a different file or switch to that window.');
+  }
   if (format === 'pdf') {
     if (!parsed.printHtml) throw new Error('The document print surface was unavailable.');
     await storage.atomicWrite(path, await renderPdf(parsed.printHtml, document.page));
@@ -343,6 +347,7 @@ async function saveToPath(request: SaveRequest, path: string, state: FileWindow)
   const recentFiles = await storage.remember(path);
   await storage.clearRecovery(state.recoveryKey);
   state.dirty = false;
+  state.documentPath = resolve(path).toLowerCase();
   return { status: 'saved', source, outputFormat: format, displayName: source.displayName, recentFiles };
 }
 
@@ -350,7 +355,7 @@ function installIpcHandlers(): void {
   ipcMain.handle('documents:new', () => { createWindow(); });
   ipcMain.handle('documents:open', async (event) => {
     const path = await chooseOpenPath(fileWindow(event).window);
-    if (path) createWindow(undefined, await openPath(path));
+    if (path) createWindow(path);
     return null;
   });
   ipcMain.handle('documents:open-external', async (event) => {
@@ -360,7 +365,13 @@ function installIpcHandlers(): void {
     if (result) return result;
     const path = state.externalPath;
     state.externalPath = undefined;
-    return path ? openPath(path) : null;
+    if (!path) return null;
+    try {
+      return await openPath(path);
+    } catch (error) {
+      state.documentPath = undefined;
+      throw error;
+    }
   });
   ipcMain.on('documents:cancel-external', (event) => {
     fileWindow(event).externalPath = undefined;
@@ -369,7 +380,7 @@ function installIpcHandlers(): void {
     if (typeof id !== 'string') throw new Error('Invalid recent file identifier.');
     const path = await storage.getRecentPath(id);
     if (!path) throw new Error('This recent file is no longer available.');
-    createWindow(undefined, await openPath(path));
+    createWindow(path);
     return null;
   });
   ipcMain.handle('documents:save', async (event, request: unknown) => {
@@ -473,6 +484,15 @@ function installIpcHandlers(): void {
 }
 
 function createWindow(externalPath?: string, initialResult?: OpenResult, recoveryKey: string = randomUUID()): void {
+  const path = externalPath ?? (initialResult?.document.source && storage.resolveSource(initialResult.document.source.id));
+  const documentPath = path ? resolve(path).toLowerCase() : undefined;
+  const existing = documentPath && [...windows.values()].find((state) => state.documentPath === documentPath);
+  if (existing) {
+    if (existing.window.isMinimized()) existing.window.restore();
+    existing.window.show();
+    existing.window.focus();
+    return;
+  }
   const window = new BrowserWindow({
     width: 1440,
     height: 940,
@@ -489,7 +509,7 @@ function createWindow(externalPath?: string, initialResult?: OpenResult, recover
       sandbox: true,
     },
   });
-  const state: FileWindow = { window, dirty: false, forceClose: false, closePromptOpen: false, recoveryKey, externalPath, initialResult };
+  const state: FileWindow = { window, dirty: false, forceClose: false, closePromptOpen: false, recoveryKey, externalPath, initialResult, documentPath };
   const windowId = window.webContents.id;
   windows.set(windowId, state);
 
@@ -526,7 +546,9 @@ function createWindow(externalPath?: string, initialResult?: OpenResult, recover
   window.on('close', (event) => {
     if (state.forceClose || !state.dirty) return;
     event.preventDefault();
-    const choice = dialog.showMessageBoxSync(window, {
+    if (state.closePromptOpen) return;
+    state.closePromptOpen = true;
+    void dialog.showMessageBox(window, {
       type: 'warning',
       title: 'Unsaved changes',
       message: 'Save changes before closing?',
@@ -535,13 +557,16 @@ function createWindow(externalPath?: string, initialResult?: OpenResult, recover
       defaultId: 0,
       cancelId: 2,
       noLink: true,
-    });
-    if (choice === 0) {
-      window.webContents.send('app:command', 'save-and-close');
-    } else if (choice === 1) {
-      state.forceClose = true;
-      void storage.clearRecovery(state.recoveryKey).finally(() => window?.close());
-    }
+    }).then(async ({ response }) => {
+      if (window.isDestroyed()) return;
+      if (response === 0) {
+        window.webContents.send('app:command', 'save-and-close');
+      } else if (response === 1) {
+        await storage.clearRecovery(state.recoveryKey);
+        state.forceClose = true;
+        window.close();
+      }
+    }).catch(() => undefined).finally(() => { state.closePromptOpen = false; });
   });
   window.on('closed', () => { windows.delete(windowId); });
 }
