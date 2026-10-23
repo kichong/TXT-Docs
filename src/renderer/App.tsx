@@ -399,6 +399,9 @@ export function App() {
   const initialExternalOpenChecked = useRef(false);
   const [pagePosition, setPagePosition] = useState({ current: 1, total: 1 });
   const plainTextMode = document.source?.format === 'txt' || document.source?.format === 'md';
+  useEffect(() => {
+    window.document.title = `${document.source?.displayName || document.title.trim() || 'Untitled document'} — TXT Docs`;
+  }, [document.source?.displayName, document.title]);
   const hasSectionLayout = useMemo(
     () => (document.content.content ?? []).some((node) => node.type === 'documentSection'),
     [document.content],
