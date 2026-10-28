@@ -98,6 +98,13 @@ export function updateDocumentSearch(editor: Editor, query: string, currentIndex
         .setSelection(TextSelection.create(editor.state.doc, current.from, current.to))
         .scrollIntoView(),
     );
+    // Find keeps keyboard focus in its input, so the editor's selection scroll
+    // cannot reliably reveal the result. Scroll the rendered match explicitly.
+    editor.view.dom.querySelector('.document-search-match.is-current')?.scrollIntoView({
+      block: 'center',
+      inline: 'nearest',
+      behavior: 'instant',
+    });
   }
   return state;
 }

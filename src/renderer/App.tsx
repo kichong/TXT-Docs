@@ -981,7 +981,7 @@ export function App() {
       setFindQuery(query);
       setFindIndex(result.currentIndex);
       setFindCount(result.matches.length);
-      window.setTimeout(() => findInputRef.current?.focus());
+      window.setTimeout(() => findInputRef.current?.focus({ preventScroll: true }));
     },
     [editor],
   );

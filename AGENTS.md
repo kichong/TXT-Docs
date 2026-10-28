@@ -14,7 +14,7 @@
 | Task | Start here | Also inspect |
 | --- | --- | --- |
 | Editor UI, toolbar, page layout, save/close flow | `src/renderer/App.tsx`, `src/renderer/styles.css` | `src/renderer/extensions.ts`, `src/renderer/toolbar-preferences.ts`, `src/renderer/color-contrast.ts` |
-| Rich text behavior, Tab indentation, find, Tiptap schema | `src/renderer/extensions.ts`, `src/renderer/search-extension.ts` | `src/shared/types.ts`, relevant `tests/` |
+| Rich text behavior, Tab indentation, find, Tiptap schema | `src/renderer/extensions.ts`, `src/renderer/search-extension.ts` | `src/shared/types.ts`, relevant `tests/`, `scripts/search-smoke.mjs` |
 | Screen pagination, collapsible page gaps, and current/total page indicator | `src/renderer/screen-pagination.ts`, `src/renderer/App.tsx`, `src/renderer/styles.css` | `scripts/screen-pagination-smoke.mjs`, `src/shared/types.ts` |
 | Lists, numbering continuity, and paragraph line spacing | `src/main/docx/importer.ts`, `src/main/docx/exporter.ts`, `src/renderer/extensions.ts` | `src/renderer/App.tsx`, `src/renderer/styles.css`, `src/main.ts` (print styles), `tests/docx-roundtrip.test.ts`, `scripts/lists-spacing-smoke.mjs` |
 | DOCX fidelity and comments | `src/main/docx/importer.ts`, `src/main/docx/exporter.ts` | `src/shared/types.ts`, `tests/docx-roundtrip.test.ts` |
