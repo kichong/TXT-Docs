@@ -17,6 +17,7 @@
 | Rich text behavior, Tab indentation, find, Tiptap schema | `src/renderer/extensions.ts`, `src/renderer/search-extension.ts` | `src/shared/types.ts`, relevant `tests/`, `scripts/search-smoke.mjs` |
 | Screen pagination, collapsible page gaps, and current/total page indicator | `src/renderer/screen-pagination.ts`, `src/renderer/App.tsx`, `src/renderer/styles.css` | `scripts/screen-pagination-smoke.mjs`, `src/shared/types.ts` |
 | Lists, numbering continuity, and paragraph line spacing | `src/main/docx/importer.ts`, `src/main/docx/exporter.ts`, `src/renderer/extensions.ts` | `src/renderer/App.tsx`, `src/renderer/styles.css`, `src/main.ts` (print styles), `tests/docx-roundtrip.test.ts`, `scripts/lists-spacing-smoke.mjs` |
+| Direct Save as PDF, native printing, and print-only page breaks | `src/main.ts`, `src/renderer/App.tsx` | `src/preload.ts`, `src/shared/types.ts`, `src/shared/schemas.ts`, `scripts/pdf-print-smoke.mjs`, `scripts/screen-pagination-smoke.mjs` |
 | DOCX fidelity and comments | `src/main/docx/importer.ts`, `src/main/docx/exporter.ts` | `src/shared/types.ts`, `tests/docx-roundtrip.test.ts` |
 | Plain text, Markdown, legacy `.doc` | `src/shared/plain-text.ts`, `src/main/legacy-converter.ts` | `src/main.ts`, `tests/plain-text.test.ts` |
 | File lifecycle, multiple windows, recent files, per-window recovery, launch files | `src/main.ts`, `src/main/storage.ts`, `src/main/launch-files.ts` | `src/preload.ts`, `src/shared/schemas.ts`, `tests/storage.test.ts`, `tests/window-recovery.test.ts`, `scripts/multi-window-smoke.mjs` |

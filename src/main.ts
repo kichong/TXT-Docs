@@ -93,6 +93,7 @@ function createApplicationMenu(): void {
         { type: 'separator' },
         { label: 'Save', accelerator: 'Ctrl+S', click: () => sendCommand('save') },
         { label: 'Save As…', accelerator: 'Ctrl+Shift+S', click: () => sendCommand('save-as') },
+        { label: 'Save as PDF…', click: () => sendCommand('export-pdf') },
         { type: 'separator' },
         { label: 'Print…', accelerator: 'Ctrl+P', click: () => sendCommand('print') },
         { type: 'separator' },
@@ -197,20 +198,23 @@ function editableSaveFormat(document: EditorDocumentV1): Exclude<SaveFormat, 'pd
   return format === 'txt' || format === 'md' ? format : 'docx';
 }
 
-async function chooseSavePath(document: EditorDocumentV1, owner: BrowserWindow): Promise<string | null> {
-  const format = editableSaveFormat(document);
+async function chooseSavePath(document: EditorDocumentV1, owner: BrowserWindow, pdfOnly = false): Promise<string | null> {
+  const format = pdfOnly ? 'pdf' : editableSaveFormat(document);
   const cleanTitle = document.title.replace(/[<>:"/\\|?*\u0000-\u001F]/gu, '').trim() || 'Untitled document';
   const result = await dialog.showSaveDialog(owner, {
-    title: 'Save As',
+    title: pdfOnly ? 'Save as PDF' : 'Save As',
     defaultPath: `${cleanTitle}.${format}`,
-    filters: [
+    filters: pdfOnly ? [{ name: 'PDF document', extensions: ['pdf'] }] : [
       { name: 'Word document', extensions: ['docx'] },
       { name: 'PDF document', extensions: ['pdf'] },
       { name: 'Plain text', extensions: ['txt'] },
       { name: 'Markdown', extensions: ['md'] },
     ],
   });
-  return result.canceled ? null : result.filePath ?? null;
+  if (result.canceled || !result.filePath) return null;
+  const path = extname(result.filePath) ? result.filePath : `${result.filePath}.${format}`;
+  if (pdfOnly && extname(path).toLowerCase() !== '.pdf') throw new Error('Choose a .pdf file name for the PDF copy.');
+  return path;
 }
 
 function saveFormatForPath(path: string): SaveFormat {
@@ -227,6 +231,8 @@ const PRINT_STYLES = `
   html, body { margin: 0; padding: 0; color: #202124; background: #fff; }
   body { font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1; }
   .document-editor { min-height: 0; outline: none; caret-color: transparent; }
+  .print-segment { min-height: 1px; }
+  .print-segment + .print-segment { break-before: page; }
   .document-editor [data-text-color] { color: var(--document-text-color) !important; }
   .document-editor mark {
     padding: 0 .06em; border-radius: 2px; color: var(--highlight-foreground, #202124);
@@ -235,6 +241,7 @@ const PRINT_STYLES = `
   .document-editor section[data-document-section] {
     min-width: 0; column-count: var(--section-columns, 1); column-gap: var(--section-column-gap, .5in);
   }
+  .document-editor section[data-document-section][data-columns="1"] { column-count: auto; }
   .document-editor section[data-document-section][data-explicit-columns="true"] {
     display: grid; grid-template-columns: var(--section-column-template); gap: var(--section-column-gap, 0); column-count: 1;
   }
@@ -270,7 +277,7 @@ const PRINT_STYLES = `
   }
   .document-editor th { background: #f1f3f6; font-weight: 650; }
   .document-editor th p, .document-editor td p { margin: 0; }
-  .document-editor [data-page-break] { height: 0; margin: 0; border: 0; break-after: page; }
+  .document-editor [data-page-break] { height: 0; margin: 0; border: 0; column-span: all; break-after: page; }
   .document-editor [data-page-break]::after { display: none; }
   ::selection { color: inherit; background: transparent; }
 `;
@@ -281,7 +288,7 @@ function printLayoutStyles(page: PageSettings): string {
   const { top, right, bottom, left } = page.marginsIn;
   return `
     @page { size: Letter portrait; margin: ${top}in ${right}in ${bottom}in ${left}in; }
-    .document-editor { column-count: ${columns}; column-gap: ${gap}in; }
+    .document-editor { column-count: ${columns === 1 ? 'auto' : columns}; column-gap: ${gap}in; }
   `;
 }
 
@@ -301,9 +308,22 @@ async function createPrintWindow(html: string, pageSettings: PageSettings): Prom
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
     <style>${PRINT_STYLES}${printLayoutStyles(pageSettings)}</style></head>
     <body><article class="document-editor">${html}</article></body></html>`;
-  await printWindow.loadURL(`data:text/html;base64,${Buffer.from(page, 'utf8').toString('base64')}`);
-  await printWindow.webContents.executeJavaScript(`Promise.all([document.fonts.ready, ...Array.from(document.images, image => image.complete ? Promise.resolve() : new Promise(resolve => { image.onload = resolve; image.onerror = resolve; }))]).then(() => true)`);
-  return printWindow;
+  try {
+    await printWindow.loadURL(`data:text/html;base64,${Buffer.from(page, 'utf8').toString('base64')}`);
+    // Forced page breaks inside CSS columns are unreliable in Chromium. Split
+    // the print-only DOM into page segments while leaving editor data intact.
+    await printWindow.webContents.executeJavaScript(`(() => {
+      const root = document.querySelector('article.document-editor');
+      root.classList.add('print-segment');
+      for (let marker = root.querySelector('[data-page-break]'); marker; marker = root.querySelector('[data-page-break]')) {
+        const range = document.createRange(); range.setStart(root, 0); range.setEndBefore(marker);
+        const segment = document.createElement('article'); segment.className = 'document-editor print-segment';
+        segment.append(range.extractContents()); root.before(segment); marker.remove();
+      }
+    })()`);
+    await printWindow.webContents.executeJavaScript(`Promise.all([document.fonts.ready, ...Array.from(document.images, image => image.complete ? Promise.resolve() : new Promise(resolve => { image.onload = resolve; image.onerror = resolve; }))]).then(() => true)`);
+    return printWindow;
+  } catch (error) { printWindow.destroy(); throw error; }
 }
 
 async function renderPdf(html: string, pageSettings: PageSettings): Promise<Uint8Array> {
@@ -397,7 +417,7 @@ function installIpcHandlers(): void {
   });
   ipcMain.handle('documents:save-as', async (event, request: unknown) => {
     const parsed = saveRequestSchema.parse(request) as SaveRequest;
-    const path = await chooseSavePath(parsed.document, fileWindow(event).window);
+    const path = await chooseSavePath(parsed.document, fileWindow(event).window, parsed.exportPdf);
     return path
       ? saveToPath(parsed, path, fileWindow(event))
       : ({ status: 'cancelled', recentFiles: await storage.getRecentFiles() } satisfies SaveResult);
@@ -415,17 +435,16 @@ function installIpcHandlers(): void {
   ipcMain.handle('documents:print', async (_event, request: unknown): Promise<PrintResult> => {
     const parsed = printRequestSchema.parse(request) as PrintRequest;
     const printWindow = await createPrintWindow(parsed.html, parsed.page);
-    return new Promise((resolve) => {
+    try { return await new Promise<PrintResult>((resolve) => {
       printWindow.webContents.print(
         { printBackground: true, silent: false },
         (success, errorType) => {
-          printWindow.destroy();
           if (success) resolve({ status: 'printed' });
-          else if (errorType === 'cancelled') resolve({ status: 'cancelled' });
+          else if (/cancel/iu.test(errorType)) resolve({ status: 'cancelled' });
           else resolve({ status: 'failed', error: errorType });
         },
       );
-    });
+    }); } finally { printWindow.destroy(); }
   });
   ipcMain.handle('documents:pick-image', async (event): Promise<ImageAsset | null> => {
     const result = await dialog.showOpenDialog(fileWindow(event).window, {

@@ -18,6 +18,7 @@ import {
   Baseline,
   Bug,
   Bold,
+  FileDown,
   BookOpenText,
   ChevronLeft,
   ChevronDown,
@@ -604,7 +605,7 @@ export function App() {
   }, [editor, openExternalDocument]);
 
   const saveDocument = useCallback(
-    async (saveAs = false, closeWhenDone = false): Promise<boolean> => {
+    async (saveAs = false, closeWhenDone = false, exportPdf = false): Promise<boolean> => {
       if (!editor || savingRef.current) return false;
       savingRef.current = true;
       const originalDocument = documentRef.current;
@@ -618,6 +619,7 @@ export function App() {
           document: current,
           overwriteCompatibilityIssues: true,
           printHtml: editor.getHTML(),
+          exportPdf,
         };
         const result = saveAs
           ? await window.documentsApi.saveDocumentAs(request)
@@ -1016,6 +1018,7 @@ export function App() {
       else if (command === 'find') showFind();
       else if (command === 'save') void saveDocument(false);
       else if (command === 'save-as') void saveDocument(true);
+      else if (command === 'export-pdf') void saveDocument(true, false, true);
       else if (command === 'print') void printDocument();
       else if (command === 'save-and-close') void saveDocument(false, true);
     });
@@ -1028,6 +1031,11 @@ export function App() {
       if (event.ctrlKey && event.key.toLowerCase() === 'f') {
         event.preventDefault();
         showFind();
+        return;
+      }
+      if (event.ctrlKey && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        void printDocument();
         return;
       }
       if (plainTextMode) return;
@@ -1047,7 +1055,7 @@ export function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editor, plainTextMode, showFind]);
+  }, [editor, plainTextMode, printDocument, showFind]);
 
   useEffect(() => {
     if (!findOpen || !findQuery) return;
@@ -1184,6 +1192,7 @@ export function App() {
             <ToolButton label="New document" icon={<FilePlus2 size={19} />} onClick={createNew} disabled={busy} />
             <ToolButton label="Open document" icon={<FolderOpen size={19} />} onClick={() => void openDocument()} disabled={busy} />
             <ToolButton label="Save" icon={<Save size={19} />} onClick={() => void saveDocument(false)} disabled={busy} />
+            <ToolButton label="Save as PDF" icon={<FileDown size={19} />} onClick={() => void saveDocument(true, false, true)} disabled={busy} />
             <ToolButton label="Print document" icon={<Printer size={19} />} onClick={() => void printDocument()} disabled={busy} />
           </div>
           <div className="document-identity">

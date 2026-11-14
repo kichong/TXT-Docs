@@ -69,6 +69,7 @@ export const saveRequestSchema = z.object({
   document: editorDocumentSchema,
   overwriteCompatibilityIssues: z.boolean().optional(),
   printHtml: z.string().max(50_000_000).optional(),
+  exportPdf: z.boolean().optional(),
 });
 
 export const printRequestSchema = z.object({

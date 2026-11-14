@@ -74,6 +74,7 @@ export interface SaveRequest {
   document: EditorDocumentV1;
   overwriteCompatibilityIssues?: boolean;
   printHtml?: string;
+  exportPdf?: boolean;
 }
 
 export interface SaveResult {
@@ -144,6 +145,7 @@ export type AppCommand =
   | 'find'
   | 'save'
   | 'save-as'
+  | 'export-pdf'
   | 'print'
   | 'save-and-close';
 

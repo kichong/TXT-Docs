@@ -8,6 +8,7 @@ TXT Docs is a local-first Windows word processor for everyday DOCX, Markdown, an
 - Create, open, edit, and save `.docx`, `.txt`, and `.md`
 - Open supported documents directly from Windows **Open with** in a separate window
 - Save As `.docx`, `.pdf`, `.txt`, or `.md` from one native format picker
+- Direct **Save as PDF** and **Print document** toolbar buttons, plus File menu commands and `Ctrl+P` printing; a PDF copy preserves the editable document and its unsaved state
 - Find text with `Ctrl+F`, match counts, next/previous navigation, and highlighted results
 - Paste with source formatting (default), merged formatting, or text only
 - Fonts, sizes, title and heading styles, basic color palettes, highlights, inline formatting, alignment, spacing, lists, and indentation
@@ -17,7 +18,7 @@ TXT Docs is a local-first Windows word processor for everyday DOCX, Markdown, an
 - Nested numbered lists use numbers, lowercase letters, and lowercase Roman numerals with Tab/Shift+Tab or the indent controls
 - All toolbar groups are shown by default and can be customized
 - Letter-size pages while writing, a live current/total page indicator, and clean, cursor-free PDF output with native printing
-- Resizable document outline and compact four-action file toolbar
+- Resizable document outline and compact file toolbar
 - Recent documents and local crash recovery
 - Visible app version, automatic update checks, download progress, and restart-to-update through GitHub Releases
 - Optional legacy `.doc` import through an installed LibreOffice converter
@@ -61,7 +62,7 @@ TXT Docs uses GitHub Releases as its public update feed. A tagged release is bui
 2. Tag that commit with the matching version, such as `v0.3.0`.
 3. Push the tag. The **Release TXT Docs** GitHub Actions workflow runs the checks, builds the installer, uploads the release assets, and publishes the completed release.
 
-Installed builds check for updates shortly after launch and every six hours while running. Downloads require user confirmation, and TXT Docs asks the user to save before restarting to install. The current Windows installer is not code-signed, so Windows SmartScreen may warn on the initial download.
+Installed builds check for updates shortly after launch and every six hours while running. Downloads require user confirmation, and TXT Docs asks the user to save before restarting to install. **Restart to update** installs silently and reopens the app. Versions before 0.3.17 still use their previous interactive updater for the transition to this version. The current Windows installer is not code-signed, so Windows SmartScreen may warn on the initial download.
 
 ## License
 

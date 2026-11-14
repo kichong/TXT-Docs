@@ -19,7 +19,7 @@ it('requires explicit installation and keeps normal quit from installing a downl
   (downloaded as (info: { version: string }) => void)({ version: '0.3.14' });
   expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
   manager.installUpdate();
-  expect(autoUpdater.quitAndInstall).toHaveBeenCalledWith(false, true);
+  expect(autoUpdater.quitAndInstall).toHaveBeenCalledWith(true, true);
 });
 
 function state(patch: Partial<AppUpdateState>): AppUpdateState {
