@@ -7,6 +7,30 @@ import { _electron as electron } from 'playwright';
 const directory = await mkdtemp(join(tmpdir(), 'txt-docs-pdf-print-'));
 const packaged = process.argv.includes('--packaged');
 const app = await electron.launch({ ...(packaged ? { executablePath: resolve('release/win-unpacked/TXT Docs.exe') } : {}), args: [...(packaged ? [] : [resolve('.')]), `--user-data-dir=${join(directory, 'profile')}`] });
+async function usePreview(print = true) {
+  let preview;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    for (const window of app.windows()) {
+      if (!window.isClosed() && await window.title().catch(() => '') === 'Print preview') preview = window;
+    }
+    if (preview) break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.ok(preview, 'Print preview opens');
+  await preview.getByRole('button', { name: 'Print…', exact: true }).waitFor();
+  await preview.waitForTimeout(1000);
+  await preview.screenshot({ path: join(directory, 'preview.png') });
+  if (print) {
+    await preview.getByRole('button', { name: 'Print…', exact: true }).focus();
+    await preview.keyboard.press('Enter');
+    await preview.waitForTimeout(250);
+    await preview.getByRole('button', { name: 'Close', exact: true }).click();
+  } else {
+    await preview.getByRole('button', { name: 'Close', exact: true }).focus();
+    await preview.keyboard.press('Escape').catch(error => { if (!preview.isClosed()) throw error; });
+  }
+}
+
 try {
   await app.evaluate(({ app, dialog }) => {
     dialog.showMessageBox = async () => ({ response: 1 });
@@ -40,17 +64,23 @@ try {
   assert.equal(await page.locator('.save-state').innerText(), 'Unsaved');
   assert.match(await page.evaluate(async () => { try { await window.documentsApi.installUpdate(null); return ''; } catch (error) { return error.message; } }), /Save all open documents/u);
   await page.getByRole('button', { name: 'Print document', exact: true }).click();
+  await usePreview();
   await page.waitForFunction(() => document.querySelector('.save-state').textContent === 'Unsaved');
   const print = await app.evaluate(() => globalThis.outputReports.find((entry) => entry.kind === 'print'));
   assert.equal(print.options.silent, false); assert.equal(print.options.printBackground, true);
   assert.match((await app.evaluate(() => globalThis.outputReports.find((entry) => entry.kind === 'pdf'))).text, /LAST_PAGE_MARKER/u);
   await page.locator('.document-editor').click(); await page.keyboard.press('Control+p');
+  await usePreview();
   for (let attempt = 0; attempt < 100; attempt++) {
     if (await app.evaluate(() => globalThis.outputReports.filter((entry) => entry.kind === 'print').length) >= 2) break;
     await page.waitForTimeout(50);
   }
   await page.waitForFunction(() => document.querySelector('.save-state').textContent === 'Unsaved');
   assert.equal(await app.evaluate(() => globalThis.outputReports.filter((entry) => entry.kind === 'print').length), 2);
+  await page.locator('.document-editor').click(); await page.keyboard.press('Control+p');
+  await usePreview(false);
+  await page.waitForFunction(() => document.querySelector('.save-state').textContent === 'Unsaved');
+  assert.equal(await app.evaluate(() => globalThis.outputReports.filter(entry => entry.kind === 'print').length), 2);
   const columnsPath = join(directory, 'columns.pdf');
   await app.evaluate(({ dialog }, path) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: path }); }, columnsPath);
   await page.evaluate(() => {

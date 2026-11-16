@@ -67,3 +67,5 @@ Installed builds check for updates shortly after launch and every six hours whil
 ## License
 
 TXT Docs is available under the [Apache License 2.0](LICENSE).
+
+Print opens a preview of the generated PDF pages before the native printer dialog. Review pages, then choose **Print…** or **Close**.

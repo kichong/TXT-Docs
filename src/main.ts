@@ -1,3 +1,4 @@
+import { showPrintPreview } from './main/print-preview';
 import {
   app,
   BrowserWindow,
@@ -304,7 +305,7 @@ async function createPrintWindow(html: string, pageSettings: PageSettings): Prom
     },
   });
   const page = `<!doctype html>
-    <html><head><meta charset="utf-8">
+    <html><head><meta charset="utf-8"><title>Document</title>
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
     <style>${PRINT_STYLES}${printLayoutStyles(pageSettings)}</style></head>
     <body><article class="document-editor">${html}</article></body></html>`;
@@ -432,19 +433,23 @@ function installIpcHandlers(): void {
       repositoryUrl: 'https://github.com/kichong/TXT-Docs',
     }));
   });
-  ipcMain.handle('documents:print', async (_event, request: unknown): Promise<PrintResult> => {
+  ipcMain.handle('documents:print', async (event, request: unknown): Promise<PrintResult> => {
     const parsed = printRequestSchema.parse(request) as PrintRequest;
     const printWindow = await createPrintWindow(parsed.html, parsed.page);
-    try { return await new Promise<PrintResult>((resolve) => {
-      printWindow.webContents.print(
-        { printBackground: true, silent: false },
-        (success, errorType) => {
-          if (success) resolve({ status: 'printed' });
-          else if (/cancel/iu.test(errorType)) resolve({ status: 'cancelled' });
-          else resolve({ status: 'failed', error: errorType });
-        },
-      );
-    }); } finally { printWindow.destroy(); }
+    let result: PrintResult = { status: 'cancelled' };
+    try {
+      const pdf = await printWindow.webContents.printToPDF({ pageSize: 'Letter', printBackground: true, displayHeaderFooter: false, preferCSSPageSize: true });
+      await showPrintPreview(printWindow, pdf, fileWindow(event).window, async () => {
+        result = await new Promise<PrintResult>((resolve) => {
+          printWindow.webContents.print({ printBackground: true, silent: false }, (success, errorType) => {
+            if (success) resolve({ status: 'printed' });
+            else if (/cancel/iu.test(errorType)) resolve({ status: 'cancelled' });
+            else resolve({ status: 'failed', error: errorType });
+          });
+        });
+      });
+      return result;
+    } finally { printWindow.destroy(); }
   });
   ipcMain.handle('documents:pick-image', async (event): Promise<ImageAsset | null> => {
     const result = await dialog.showOpenDialog(fileWindow(event).window, {
